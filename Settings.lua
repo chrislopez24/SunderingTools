@@ -51,6 +51,108 @@ function Helpers:CreateText(parent, text, template, width)
   return CreateTextBlock(parent, text, template, width)
 end
 
+function Helpers:CreateSlider(parent, label, minValue, maxValue, step, value, onChange)
+  local holder = CreateFrame("Frame", nil, parent)
+  holder:SetSize(320, 56)
+
+  holder.label = CreateTextBlock(holder, label, "GameFontHighlight", 220)
+  holder.label:SetPoint("TOPLEFT", 0, 0)
+
+  holder.valueText = CreateTextBlock(holder, tostring(value), "GameFontHighlight", 80)
+  holder.valueText:SetPoint("TOPRIGHT", 0, 0)
+  holder.valueText:SetJustifyH("RIGHT")
+
+  local slider = CreateFrame("Slider", nil, holder, "UISliderTemplate")
+  slider:SetPoint("TOPLEFT", 0, -18)
+  slider:SetPoint("TOPRIGHT", 0, -18)
+  slider:SetHeight(16)
+  slider:SetMinMaxValues(minValue, maxValue)
+  slider:SetValueStep(step or 1)
+
+  if slider.SetObeyStepOnDrag then
+    slider:SetObeyStepOnDrag(true)
+  end
+
+  local initializing = true
+  slider:SetScript("OnValueChanged", function(self, newValue)
+    local steppedValue = math.floor((newValue / (step or 1)) + 0.5) * (step or 1)
+    if step == 1 then
+      steppedValue = math.floor(steppedValue + 0.5)
+    end
+
+    holder.valueText:SetText(tostring(steppedValue))
+    if not initializing then
+      onChange(steppedValue)
+    end
+  end)
+  slider:SetValue(value)
+  initializing = false
+
+  holder.slider = slider
+  return holder
+end
+
+function Helpers:CreateEditBox(parent, label, width, value, onChange)
+  local holder = CreateFrame("Frame", nil, parent)
+  holder:SetSize(width or 320, 52)
+
+  holder.label = CreateTextBlock(holder, label, "GameFontHighlight", width or 320)
+  holder.label:SetPoint("TOPLEFT", 0, 0)
+
+  local input = CreateFrame("EditBox", nil, holder, "InputBoxTemplate")
+  input:SetSize(width or 320, 24)
+  input:SetPoint("TOPLEFT", 0, -20)
+  input:SetAutoFocus(false)
+  input:SetText(value or "")
+
+  local function commit()
+    onChange(input:GetText())
+  end
+
+  input:SetScript("OnEnterPressed", function(self)
+    commit()
+    self:ClearFocus()
+  end)
+  input:SetScript("OnEditFocusLost", commit)
+
+  holder.input = input
+  return holder
+end
+
+function Helpers:CreateDropdown(parent, label, options, selectedValue, width, onChange)
+  local holder = CreateFrame("Frame", nil, parent)
+  holder:SetSize((width or 180) + 32, 52)
+
+  holder.label = CreateTextBlock(holder, label, "GameFontHighlight", width or 180)
+  holder.label:SetPoint("TOPLEFT", 0, 0)
+
+  local dropdown = CreateFrame("Frame", nil, holder, "UIDropDownMenuTemplate")
+  dropdown:SetPoint("TOPLEFT", -16, -14)
+  dropdown.value = selectedValue
+
+  UIDropDownMenu_SetWidth(dropdown, width or 180)
+  UIDropDownMenu_Initialize(dropdown, function(self, _)
+    for _, option in ipairs(options) do
+      local info = UIDropDownMenu_CreateInfo()
+      info.text = option
+      info.value = option
+      info.checked = option == dropdown.value
+      info.func = function()
+        dropdown.value = option
+        UIDropDownMenu_SetSelectedValue(dropdown, option)
+        UIDropDownMenu_SetText(dropdown, option)
+        onChange(option)
+      end
+      UIDropDownMenu_AddButton(info)
+    end
+  end)
+  UIDropDownMenu_SetSelectedValue(dropdown, selectedValue)
+  UIDropDownMenu_SetText(dropdown, selectedValue)
+
+  holder.dropdown = dropdown
+  return holder
+end
+
 function Helpers:CreatePreview(parent, previewBars, db)
   local barWidth = (db and db.barWidth) or 240
   local barHeight = (db and db.barHeight) or 20

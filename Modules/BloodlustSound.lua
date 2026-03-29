@@ -115,6 +115,19 @@ local function EnsureFrame()
   return frame
 end
 
+function module:ResetPosition(moduleDB)
+  moduleDB = moduleDB or db or (addon.db and addon.db.modules and addon.db.modules.BloodlustSound)
+  if not moduleDB then return end
+
+  moduleDB.posX = module.defaults.posX
+  moduleDB.posY = module.defaults.posY
+  db = moduleDB
+
+  if frame then
+    RefreshFrameLayout()
+  end
+end
+
 local function StopEffect()
   if module.lastHandle then
     StopSound(module.lastHandle)
@@ -193,23 +206,55 @@ function module:buildSettings(panel, helpers, addonRef, moduleDB)
   end)
   enabledBox:SetPoint("TOPLEFT", 0, 0)
 
+  local hideIconBox = helpers:CreateCheckbox(panel, "Hide Bloodlust Icon", moduleDB.hideIcon, function(value)
+    addonRef:SetModuleValue("BloodlustSound", "hideIcon", value)
+  end)
+  hideIconBox:SetPoint("TOPLEFT", enabledBox, "BOTTOMLEFT", 0, -8)
+
+  local iconSizeSlider = helpers:CreateSlider(panel, "Icon Size", 32, 128, 1, moduleDB.iconSize, function(value)
+    addonRef:SetModuleValue("BloodlustSound", "iconSize", value)
+  end)
+  iconSizeSlider:SetPoint("TOPLEFT", hideIconBox, "BOTTOMLEFT", 4, -16)
+
+  local soundFileInput = helpers:CreateEditBox(panel, "Sound File", 300, moduleDB.soundFile or "", function(value)
+    addonRef:SetModuleValue("BloodlustSound", "soundFile", value)
+  end)
+  soundFileInput:SetPoint("TOPLEFT", iconSizeSlider, "BOTTOMLEFT", -4, -12)
+
+  local channelDropdown = helpers:CreateDropdown(
+    panel,
+    "Sound Channel",
+    Model.ChannelOptions(),
+    Model.NormalizeChannel(moduleDB.soundChannel),
+    180,
+    function(value)
+      addonRef:SetModuleValue("BloodlustSound", "soundChannel", value)
+    end
+  )
+  channelDropdown:SetPoint("TOPLEFT", soundFileInput, "BOTTOMLEFT", 0, -8)
+
   local testButton = helpers:CreateButton(panel, "Test Sound", function()
     module:Test(moduleDB)
   end)
-  testButton:SetPoint("TOPLEFT", enabledBox, "BOTTOMLEFT", 4, -12)
+  testButton:SetPoint("TOPLEFT", channelDropdown, "BOTTOMLEFT", 4, -16)
 
   local stopButton = helpers:CreateButton(panel, "Stop Sound", function()
     module:Stop()
   end)
-  stopButton:SetPoint("TOPLEFT", testButton, "BOTTOMLEFT", 0, -8)
+  stopButton:SetPoint("TOPLEFT", testButton, "TOPRIGHT", 12, 0)
 
-  local details = helpers:CreateText(
+  local resetButton = helpers:CreateButton(panel, "Reset Position", function()
+    module:ResetPosition(moduleDB)
+  end)
+  resetButton:SetPoint("TOPLEFT", testButton, "BOTTOMLEFT", 0, -8)
+
+  local helpText = helpers:CreateText(
     panel,
-    string.format("File: %s\nChannel: %s", moduleDB.soundFile or "", Model.NormalizeChannel(moduleDB.soundChannel)),
+    "Use the icon in-game to drag it after enabling the module.",
     "GameFontHighlight",
     320
   )
-  details:SetPoint("TOPLEFT", stopButton, "BOTTOMLEFT", -4, -12)
+  helpText:SetPoint("TOPLEFT", resetButton, "BOTTOMLEFT", -4, -12)
 end
 
 function module:onConfigChanged(_, moduleDB, key)

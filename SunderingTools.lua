@@ -118,22 +118,6 @@ function addon:SetEditMode(enabled)
     end
 end
 
-addon:RegisterModule({
-    key = "BloodlustSound",
-    order = 20,
-    label = "Bloodlust Sound",
-    defaults = {
-        enabled = true,
-        hideIcon = false,
-        iconSize = 64,
-        posX = 0,
-        posY = 100,
-        soundFile = "Interface\\AddOns\\SunderingTools\\sounds\\pedrolust.mp3",
-        soundChannel = "Master",
-        duration = 40,
-    },
-})
-
 -- Initialize minimap icon
 function addon:InitMinimapIcon()
     local LDB = LibStub and LibStub("LibDataBroker-1.1", true)
@@ -192,7 +176,7 @@ function addon:ShowQuickMenu()
             text = "Bloodlust Sound",
             checked = function() return addon.db.BloodlustSound.enabled end,
             func = function()
-                addon.db.BloodlustSound.enabled = not addon.db.BloodlustSound.enabled
+                addon:SetModuleValue("BloodlustSound", "enabled", not addon.db.BloodlustSound.enabled)
             end,
             keepShownOnClick = true,
         },
