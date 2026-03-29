@@ -1,7 +1,6 @@
 package-as: SunderingTools
 enable-nolib-creation: no
 ignore:
-  - .deepeval
   - .github
   - docs
   - tests
