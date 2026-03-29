@@ -6,6 +6,8 @@
 ## SavedVariables: SunderingToolsDB
 
 # Core
+Core\Config.lua
+Core\Registry.lua
 SunderingTools.lua
 Settings.lua
 
