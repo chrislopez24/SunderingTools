@@ -4,3 +4,4 @@ __pycache__/
 
 # Scratch and local brainstorming artifacts
 .superpowers/
+.worktrees/
