@@ -47,6 +47,10 @@ function Helpers:CreateButton(parent, label, onClick)
   return button
 end
 
+function Helpers:CreateText(parent, text, template, width)
+  return CreateTextBlock(parent, text, template, width)
+end
+
 function Helpers:CreatePreview(parent, previewBars, db)
   local barWidth = (db and db.barWidth) or 240
   local barHeight = (db and db.barHeight) or 20

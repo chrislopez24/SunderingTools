@@ -128,7 +128,7 @@ addon:RegisterModule({
         iconSize = 64,
         posX = 0,
         posY = 100,
-        soundFile = "Interface\\AddOns\\SunderingTools\\sounds\\bloodlust.ogg",
+        soundFile = "Interface\\AddOns\\SunderingTools\\sounds\\pedrolust.mp3",
         soundChannel = "Master",
         duration = 40,
     },
