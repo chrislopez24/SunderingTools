@@ -5,6 +5,7 @@ local addon = _G.SunderingTools
 if not addon then return end
 
 local Model = dofile("Modules/InterruptTrackerModel.lua")
+local defaultPosX, defaultPosY = Model.GetDefaultPosition()
 
 local module = {
     key = "InterruptTracker",
@@ -12,11 +13,12 @@ local module = {
     order = 10,
     defaults = {
         enabled = true,
-        posX = 0,
-        posY = -200,
+        posX = defaultPosX,
+        posY = defaultPosY,
         maxBars = 5,
         growDirection = "DOWN",
         spacing = 2,
+        iconSize = 24,
         barWidth = 150,
         barHeight = 24,
         showIcon = true,
@@ -33,56 +35,6 @@ local module = {
 }
 
 local db = addon.db and addon.db.InterruptTracker
-
--- Interrupt spell data by specID
-local InterruptData = {
-    -- Death Knight
-    [250] = { spellID = 47528, cd = 12, role = "TANK" }, -- Mind Freeze
-    [251] = { spellID = 47528, cd = 12, role = "DAMAGER" },
-    [252] = { spellID = 47528, cd = 12, role = "DAMAGER" },
-    -- Demon Hunter
-    [577] = { spellID = 183752, cd = 15, role = "DAMAGER" }, -- Disrupt
-    [581] = { spellID = 183752, cd = 15, role = "TANK" },
-    [1480] = { spellID = 183752, cd = 15, role = "DAMAGER" },
-    -- Druid
-    [103] = { spellID = 106839, cd = 15, role = "DAMAGER" }, -- Skull Bash
-    [104] = { spellID = 106839, cd = 15, role = "TANK" },
-    -- Evoker
-    [1467] = { spellID = 351338, cd = 20, role = "DAMAGER" }, -- Quell
-    [1473] = { spellID = 351338, cd = 18, role = "DAMAGER" },
-    -- Hunter
-    [253] = { spellID = 147362, cd = 24, role = "DAMAGER" }, -- Counter Shot
-    [254] = { spellID = 147362, cd = 24, role = "DAMAGER" },
-    [255] = { spellID = 187707, cd = 15, role = "DAMAGER" }, -- Muzzle
-    -- Mage
-    [62] = { spellID = 2139, cd = 20, role = "DAMAGER" }, -- Counterspell
-    [63] = { spellID = 2139, cd = 20, role = "DAMAGER" },
-    [64] = { spellID = 2139, cd = 20, role = "DAMAGER" },
-    -- Monk
-    [268] = { spellID = 116705, cd = 15, role = "TANK" }, -- Spear Hand Strike
-    [269] = { spellID = 116705, cd = 15, role = "DAMAGER" },
-    -- Paladin
-    [66] = { spellID = 96231, cd = 15, role = "TANK" }, -- Rebuke
-    [70] = { spellID = 96231, cd = 15, role = "DAMAGER" },
-    -- Priest
-    [258] = { spellID = 15487, cd = 30, role = "DAMAGER" }, -- Silence
-    -- Rogue
-    [259] = { spellID = 1766, cd = 15, role = "DAMAGER" }, -- Kick
-    [260] = { spellID = 1766, cd = 15, role = "DAMAGER" },
-    [261] = { spellID = 1766, cd = 15, role = "DAMAGER" },
-    -- Shaman
-    [262] = { spellID = 57994, cd = 12, role = "DAMAGER" }, -- Wind Shear
-    [263] = { spellID = 57994, cd = 12, role = "DAMAGER" },
-    [264] = { spellID = 57994, cd = 30, role = "HEALER" },
-    -- Warlock (pet)
-    [265] = { spellID = 19647, cd = 24, role = "DAMAGER" }, -- Spell Lock
-    [266] = { spellID = 19647, cd = 30, role = "DAMAGER" },
-    [267] = { spellID = 19647, cd = 24, role = "DAMAGER" },
-    -- Warrior
-    [71] = { spellID = 6552, cd = 15, role = "DAMAGER" }, -- Pummel
-    [72] = { spellID = 6552, cd = 15, role = "DAMAGER" },
-    [73] = { spellID = 6552, cd = 15, role = "TANK" },
-}
 
 -- Event tracking system (ExWind-style)
 local pendingEvents = {
@@ -102,26 +54,6 @@ local interruptStats = {} -- [guid] = count
 local CreateContainer
 local UpdatePartyData
 
--- Get class color
-local function GetClassColor(class)
-    local colors = {
-        ["WARRIOR"] = {0.78, 0.61, 0.43},
-        ["PALADIN"] = {0.96, 0.55, 0.73},
-        ["HUNTER"] = {0.67, 0.83, 0.45},
-        ["ROGUE"] = {1, 0.96, 0.41},
-        ["PRIEST"] = {1, 1, 1},
-        ["DEATHKNIGHT"] = {0.77, 0.12, 0.23},
-        ["SHAMAN"] = {0, 0.44, 0.87},
-        ["MAGE"] = {0.25, 0.78, 0.92},
-        ["WARLOCK"] = {0.53, 0.53, 0.93},
-        ["MONK"] = {0, 1, 0.6},
-        ["DRUID"] = {1, 0.49, 0.04},
-        ["DEMONHUNTER"] = {0.64, 0.19, 0.79},
-        ["EVOKER"] = {0.2, 0.58, 0.5},
-    }
-    return colors[class] or {0.5, 0.5, 0.5}
-end
-
 -- Get unit's spec ID (placeholder - would need LibGroupInSpecT for real implementation)
 local function GetUnitSpecID(unit)
     if unit == "player" then
@@ -136,23 +68,8 @@ end
 local function GetUnitInterruptData(unit)
     if not unit then return nil end
     local specID = GetUnitSpecID(unit)
-
-    -- If we have spec data, use it
-    if specID and specID > 0 and InterruptData[specID] then
-        return InterruptData[specID], specID
-    end
-
-    -- Fallback: try to detect by class
     local _, class = UnitClass(unit)
-    if class then
-        -- Find first matching spec for this class
-        for id, data in pairs(InterruptData) do
-            -- This is a simplified check - real implementation would need role detection
-            return data, id
-        end
-    end
-
-    return nil, 0
+    return Model.GetInterruptData(specID, class)
 end
 
 local function UpdateAnchorVisuals(enabled)
@@ -181,7 +98,7 @@ local function UpdateAnchorVisuals(enabled)
     end
 end
 
-function module:SetEditMode(moduleDB, enabled)
+function module:SetEditMode(enabled)
     UpdateAnchorVisuals(enabled)
 end
 
@@ -189,8 +106,7 @@ function module:ResetPosition(moduleDB)
     moduleDB = moduleDB or db or (addon.db and addon.db.modules and addon.db.modules.InterruptTracker)
     if not moduleDB then return end
 
-    moduleDB.posX = 0
-    moduleDB.posY = -200
+    moduleDB.posX, moduleDB.posY = Model.GetDefaultPosition()
 
     local anchor = self.anchor or container
     if anchor then
@@ -284,7 +200,7 @@ local function UpdateBarVisuals(bar, data)
     if db.showName then
         bar.nameText:SetText(data.name or "")
         if (db.useClassColorBar or db.useClassColor) and data.class then
-            local color = GetClassColor(data.class)
+            local color = Model.GetClassColor(data.class)
             bar.nameText:SetTextColor(unpack(color))
         else
             bar.nameText:SetTextColor(1, 1, 1)
@@ -463,19 +379,10 @@ local function TriggerCooldown(unit)
             self:SetValue(elapsed / cdDuration)
 
             if db.showTimer then
-                -- Show integer when > 6s, decimal when <= 6s
-                if remaining > 6 then
-                    local displayVal = math.floor(remaining)
-                    if displayVal ~= self._lastDisplayed then
-                        self._lastDisplayed = displayVal
-                        self.timerText:SetText(string.format("%d", displayVal))
-                    end
-                else
-                    local displayVal = math.floor(remaining * 10)
-                    if displayVal ~= self._lastDisplayed then
-                        self._lastDisplayed = displayVal
-                        self.timerText:SetText(string.format("%.1f", remaining))
-                    end
+                local text, displayVal = Model.FormatTimerText(remaining)
+                if displayVal ~= self._lastDisplayed then
+                    self._lastDisplayed = displayVal
+                    self.timerText:SetText(text)
                 end
             end
 

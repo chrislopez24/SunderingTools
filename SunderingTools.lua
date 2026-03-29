@@ -114,36 +114,9 @@ function addon:SetEditMode(enabled)
 
     local tracker = GetInterruptTrackerEditHandler(self)
     if tracker then
-        tracker.SetEditMode(tracker, self.db.modules.InterruptTracker, self.db.global.editMode)
+        tracker:SetEditMode(self.db.global.editMode)
     end
 end
-
-addon:RegisterModule({
-    key = "InterruptTracker",
-    order = 10,
-    label = "Interrupt Tracker",
-    defaults = {
-        enabled = true,
-        showIcon = true,
-        showName = true,
-        showTimer = true,
-        iconSize = 24,
-        barWidth = 150,
-        barHeight = 24,
-        spacing = 2,
-        maxBars = 5,
-        growDirection = "DOWN",
-        posX = 0,
-        posY = -200,
-        fontSize = 14,
-        nameFontSize = 14,
-        timerFontSize = 14,
-        useClassColor = true,
-        useClassColorBar = true,
-        showReadyText = false,
-        readyText = "Ready",
-    },
-})
 
 addon:RegisterModule({
     key = "BloodlustSound",

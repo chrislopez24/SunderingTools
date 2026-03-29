@@ -12,3 +12,7 @@ assert(sorted[3].key == "dps-cooling", "cooling bar should sort after ready bars
 
 local preview = Model.BuildPreviewBars()
 assert(#preview >= 3, "preview should expose at least three sample bars")
+
+local interrupt, specID = Model.GetInterruptData(0, "MAGE")
+assert(specID == 62, "class fallback should resolve to the default mage interrupt spec")
+assert(interrupt.spellID == 2139, "class fallback should use counterspell data")
