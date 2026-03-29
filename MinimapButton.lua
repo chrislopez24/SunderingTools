@@ -3,7 +3,7 @@ if not addon then return end
 
 function addon:CreateMinimapButton()
   if self.minimapButton then
-    self.minimapButton:Show()
+    self:SetMinimapVisible(self:IsMinimapVisible())
     return self.minimapButton
   end
 
@@ -28,7 +28,17 @@ function addon:CreateMinimapButton()
   button:SetScript("OnClick", function()
     addon:OpenSettings()
   end)
+  button:SetScript("OnEnter", function(self)
+    GameTooltip:SetOwner(self, "ANCHOR_LEFT")
+    GameTooltip:AddLine("|cff00ff00SunderingTools|r")
+    GameTooltip:AddLine("Click to open settings")
+    GameTooltip:Show()
+  end)
+  button:SetScript("OnLeave", function()
+    GameTooltip:Hide()
+  end)
 
   self.minimapButton = button
+  self:SetMinimapVisible(self:IsMinimapVisible())
   return button
 end

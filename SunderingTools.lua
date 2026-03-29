@@ -68,10 +68,38 @@ function addon:GetSettingsSections()
     return SettingsModel.BuildSections(self.registry:List())
 end
 
+function addon:IsMinimapVisible()
+    return not self.db.global.minimap.hide
+end
+
+function addon:SetMinimapVisible(visible)
+    self.db.global.minimap.hide = not visible
+
+    if self.minimapIcon then
+        if visible then
+            self.minimapIcon:Show("SunderingTools")
+        else
+            self.minimapIcon:Hide("SunderingTools")
+        end
+    end
+
+    if self.minimapButton then
+        if visible then
+            self.minimapButton:Show()
+        else
+            self.minimapButton:Hide()
+        end
+    end
+end
+
+function addon:CanOpenEditMode()
+    return self.InterruptTracker ~= nil and self.InterruptTracker.SetEditMode ~= nil
+end
+
 function addon:SetEditMode(enabled)
     self.db.global.editMode = enabled
 
-    if self.InterruptTracker and self.InterruptTracker.SetEditMode then
+    if self:CanOpenEditMode() then
         self.InterruptTracker.SetEditMode(self.db.modules.InterruptTracker, enabled)
     end
 end
@@ -149,6 +177,7 @@ function addon:InitMinimapIcon()
     -- Register with LibDBIcon
     LDBIcon:Register("SunderingTools", dataObject, self.db.global.minimap)
     self.minimapIcon = LDBIcon
+    self:SetMinimapVisible(self:IsMinimapVisible())
 end
 
 -- Show quick toggle menu

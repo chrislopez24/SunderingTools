@@ -12,6 +12,23 @@ local function ClearChildren(frame)
   end
 end
 
+local function CreateTextBlock(parent, text, template, width)
+  local block = parent:CreateFontString(nil, "OVERLAY", template or "GameFontHighlight")
+  block:SetJustifyH("LEFT")
+  block:SetJustifyV("TOP")
+  block:SetWidth(width or 320)
+  block:SetText(text)
+  return block
+end
+
+local function RenderInfoPanel(panel, title, message)
+  local heading = CreateTextBlock(panel, title, "GameFontNormalLarge", 320)
+  heading:SetPoint("TOPLEFT", 0, 0)
+
+  local body = CreateTextBlock(panel, message, "GameFontHighlight", 320)
+  body:SetPoint("TOPLEFT", heading, "BOTTOMLEFT", 0, -12)
+end
+
 function Helpers:CreateCheckbox(parent, label, checked, onChange)
   local box = CreateFrame("CheckButton", nil, parent, "InterfaceOptionsCheckButtonTemplate")
   box.Text:SetText(label)
@@ -65,19 +82,45 @@ end
 
 function addon:RenderSection(sectionKey, panel, helpers)
   ClearChildren(panel)
+  local content = CreateFrame("Frame", nil, panel)
+  content:SetAllPoints()
 
   if sectionKey == "General" then
-    local button = helpers:CreateButton(panel, "Open Edit Mode", function()
+    local minimapBox = helpers:CreateCheckbox(content, "Show Minimap Button", addon:IsMinimapVisible(), function(checked)
+      addon:SetMinimapVisible(checked)
+    end)
+    minimapBox:SetPoint("TOPLEFT", 0, 0)
+
+    local button = helpers:CreateButton(content, "Open Edit Mode", function()
       addon:SetEditMode(true)
     end)
-    button:SetPoint("TOPLEFT", 0, 0)
+    button:SetPoint("TOPLEFT", minimapBox, "BOTTOMLEFT", 4, -12)
+
+    local message = "Edit mode support is not available in this shell yet."
+    if addon:CanOpenEditMode() then
+      message = "Edit mode is available for supported modules."
+    else
+      button:Disable()
+    end
+
+    local helpText = CreateTextBlock(content, message, "GameFontHighlight", 320)
+    helpText:SetPoint("TOPLEFT", button, "BOTTOMLEFT", 0, -12)
     return
   end
 
   local moduleDef = self.modules[sectionKey]
   if moduleDef and moduleDef.buildSettings then
-    moduleDef:buildSettings(panel, helpers, self, self.db.modules[sectionKey])
+    moduleDef:buildSettings(content, helpers, self, self.db.modules[sectionKey])
+    if #({ content:GetChildren() }) > 0 or #({ content:GetRegions() }) > 0 then
+      return
+    end
   end
+
+  RenderInfoPanel(
+    content,
+    (moduleDef and moduleDef.label) or sectionKey,
+    "Settings for this module will be added in a later task."
+  )
 end
 
 function addon:OpenSettings()
