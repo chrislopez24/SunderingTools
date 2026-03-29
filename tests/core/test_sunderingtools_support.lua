@@ -48,10 +48,18 @@ assert(addon.db.global.minimap.hide == false, "showing the minimap button should
 assert(shown == 1, "native minimap button should show when enabled")
 
 assert(addon:CanOpenEditMode() == false, "edit mode should be unavailable without module support")
+local editModeStates = {}
 addon.InterruptTracker = {
-  SetEditMode = function() end,
+  SetEditMode = function(_, enabled)
+    table.insert(editModeStates, enabled)
+  end,
 }
 assert(addon:CanOpenEditMode() == true, "edit mode should be available when the module exposes support")
+
+addon:SetEditMode(true)
+addon:SetEditMode(false)
+assert(addon.db.global.editMode == false, "edit mode should be writable back to the locked state")
+assert(editModeStates[1] == true and editModeStates[2] == false, "edit mode should notify the module on both transitions")
 
 local opened = 0
 addon.OpenSettings = function()

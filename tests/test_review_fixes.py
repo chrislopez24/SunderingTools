@@ -30,6 +30,9 @@ def test_general_panel_includes_help_and_reset_all():
     assert "/su opens settings." in source
     assert "/su config opens settings directly." in source
     assert "/su reset reloads with defaults." in source
+    assert 'button:SetText(addon.db.global.editMode and "Lock Tracker" or "Open Edit Mode")' in source
+    assert "addon:SetEditMode(not addon.db.global.editMode)" in source
+    assert "addon:SetEditMode(false)" in source
 
 
 def test_interrupt_tracker_panel_exposes_technical_controls():
@@ -47,5 +50,9 @@ def test_interrupt_tracker_panel_exposes_technical_controls():
         "Timer Font Size",
         "Show Ready Text",
         "Ready Text",
+        "Use Class Color",
     ):
         assert label in source
+    assert 'addonRef:SetModuleValue("InterruptTracker", "useClassColorBar", value)' in source
+    assert "local function UsesClassColor(moduleDB)" in source
+    assert "if UsesClassColor(db) and data.class then" in source

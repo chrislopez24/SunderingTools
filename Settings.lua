@@ -199,6 +199,11 @@ local function CreateSettingsFrame()
   frame:SetSize(640, 560)
   frame:SetPoint("CENTER")
   frame:Hide()
+  frame:SetScript("OnHide", function()
+    if addon.db and addon.db.global and addon.db.global.editMode then
+      addon:SetEditMode(false)
+    end
+  end)
 
   frame.list = CreateFrame("Frame", nil, frame)
   frame.list:SetPoint("TOPLEFT", 12, -32)
@@ -222,9 +227,11 @@ function addon:RenderSection(sectionKey, panel, helpers)
     end)
     minimapBox:SetPoint("TOPLEFT", 0, 0)
 
-    local button = helpers:CreateButton(content, "Open Edit Mode", function()
-      addon:SetEditMode(true)
+    local button = helpers:CreateButton(content, "", function(self)
+      addon:SetEditMode(not addon.db.global.editMode)
+      self:SetText(addon.db.global.editMode and "Lock Tracker" or "Open Edit Mode")
     end)
+    button:SetText(addon.db.global.editMode and "Lock Tracker" or "Open Edit Mode")
     button:SetPoint("TOPLEFT", minimapBox, "BOTTOMLEFT", 4, -12)
 
     local message = "Edit mode support is not available in this shell yet."
@@ -286,6 +293,7 @@ end
 
 function addon:CloseSettings()
   if SettingsFrame then
+    addon:SetEditMode(false)
     SettingsFrame:Hide()
   end
 end

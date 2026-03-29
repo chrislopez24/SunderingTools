@@ -57,6 +57,14 @@ local ReLayout
 local UpdatePartyData
 local UpdateBarVisuals
 
+local function UsesClassColor(moduleDB)
+    if moduleDB.useClassColorBar ~= nil then
+        return moduleDB.useClassColorBar
+    end
+
+    return moduleDB.useClassColor
+end
+
 -- Get unit's spec ID (placeholder - would need LibGroupInSpecT for real implementation)
 local function GetUnitSpecID(unit)
     if unit == "player" then
@@ -186,10 +194,15 @@ function module:buildSettings(panel, helpers, addonRef, moduleDB)
     end)
     showNameBox:SetPoint("TOPLEFT", showIconBox, "BOTTOMLEFT", 0, -8)
 
+    local useClassColorBox = helpers:CreateCheckbox(panel, "Use Class Color", UsesClassColor(moduleDB), function(value)
+        addonRef:SetModuleValue("InterruptTracker", "useClassColorBar", value)
+    end)
+    useClassColorBox:SetPoint("TOPLEFT", showNameBox, "BOTTOMLEFT", 0, -8)
+
     local showTimerBox = helpers:CreateCheckbox(panel, "Show Timer", moduleDB.showTimer, function(value)
         addonRef:SetModuleValue("InterruptTracker", "showTimer", value)
     end)
-    showTimerBox:SetPoint("TOPLEFT", showNameBox, "BOTTOMLEFT", 0, -8)
+    showTimerBox:SetPoint("TOPLEFT", useClassColorBox, "BOTTOMLEFT", 0, -8)
 
     local showReadyTextBox = helpers:CreateCheckbox(panel, "Show Ready Text", moduleDB.showReadyText, function(value)
         addonRef:SetModuleValue("InterruptTracker", "showReadyText", value)
@@ -247,11 +260,15 @@ function module:onConfigChanged(addonRef, moduleDB, key)
         or key == "barHeight"
         or key == "showIcon"
         or key == "showName"
+        or key == "useClassColorBar"
         or key == "showTimer"
         or key == "nameFontSize"
         or key == "timerFontSize"
         or key == "showReadyText"
         or key == "readyText" then
+        if key == "useClassColorBar" then
+            moduleDB.useClassColor = moduleDB.useClassColorBar
+        end
         CreateContainer()
         for _, data in pairs(activeBars) do
             if data.bar then
@@ -360,7 +377,7 @@ local function UpdateBarVisuals(bar, data)
     -- Update name
     if db.showName then
         bar.nameText:SetText(data.name or "")
-        if (db.useClassColorBar or db.useClassColor) and data.class then
+        if UsesClassColor(db) and data.class then
             local color = Model.GetClassColor(data.class)
             bar.nameText:SetTextColor(unpack(color))
         else
