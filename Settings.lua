@@ -109,11 +109,19 @@ function Helpers:CreateEditBox(parent, label, width, value, onChange)
     onChange(input:GetText())
   end
 
+  local skipNextFocusCommit = false
   input:SetScript("OnEnterPressed", function(self)
+    skipNextFocusCommit = true
     commit()
     self:ClearFocus()
   end)
-  input:SetScript("OnEditFocusLost", commit)
+  input:SetScript("OnEditFocusLost", function()
+    if skipNextFocusCommit then
+      skipNextFocusCommit = false
+      return
+    end
+    commit()
+  end)
 
   holder.input = input
   return holder

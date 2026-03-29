@@ -182,8 +182,8 @@ function addon:ShowQuickMenu()
         },
         { text = " ", notCheckable = true, disabled = true },
         { text = "Test Bloodlust", func = function()
-            if addon.BloodlustSound and addon.BloodlustSound.Play then
-                addon.BloodlustSound.Play()
+            if addon.BloodlustSound and addon.BloodlustSound.Test then
+                addon.BloodlustSound:Test(addon.db.BloodlustSound)
             end
         end, notCheckable = true },
         { text = "Interrupt Stats", func = function()

@@ -47,6 +47,7 @@ local ExhaustionIDs = {
 
 local frame
 local activeTimer
+local pendingTrigger
 
 local function CheckExhaustion()
   for _, spellID in ipairs(ExhaustionIDs) do
@@ -115,6 +116,13 @@ local function EnsureFrame()
   return frame
 end
 
+local function CancelPendingTrigger()
+  if pendingTrigger then
+    pendingTrigger:Cancel()
+    pendingTrigger = nil
+  end
+end
+
 function module:ResetPosition(moduleDB)
   moduleDB = moduleDB or db or (addon.db and addon.db.modules and addon.db.modules.BloodlustSound)
   if not moduleDB then return end
@@ -129,6 +137,8 @@ function module:ResetPosition(moduleDB)
 end
 
 local function StopEffect()
+  CancelPendingTrigger()
+
   if module.lastHandle then
     StopSound(module.lastHandle)
     module.lastHandle = nil
@@ -302,7 +312,9 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
     local _, _, spellID = ...
     for _, id in ipairs(BloodlustSpells) do
       if spellID == id then
-        C_Timer.After(0.5, function()
+        CancelPendingTrigger()
+        pendingTrigger = C_Timer.NewTimer(0.5, function()
+          pendingTrigger = nil
           local hasExhaustion, expiration = CheckExhaustion()
           if hasExhaustion then
             PlayEffect(expiration)
