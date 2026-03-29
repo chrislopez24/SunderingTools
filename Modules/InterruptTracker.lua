@@ -4,6 +4,34 @@
 local addon = _G.SunderingTools
 if not addon then return end
 
+local Model = dofile("Modules/InterruptTrackerModel.lua")
+
+local module = {
+    key = "InterruptTracker",
+    label = "Interrupt Tracker",
+    order = 10,
+    defaults = {
+        enabled = true,
+        posX = 0,
+        posY = -200,
+        maxBars = 5,
+        growDirection = "DOWN",
+        spacing = 2,
+        barWidth = 150,
+        barHeight = 24,
+        showIcon = true,
+        showName = true,
+        showTimer = true,
+        useClassColor = true,
+        useClassColorBar = true,
+        fontSize = 14,
+        nameFontSize = 14,
+        timerFontSize = 14,
+        showReadyText = false,
+        readyText = "Ready",
+    },
+}
+
 local db = addon.db and addon.db.InterruptTracker
 
 -- Interrupt spell data by specID
@@ -56,34 +84,23 @@ local InterruptData = {
     [73] = { spellID = 6552, cd = 15, role = "TANK" },
 }
 
--- Melee specs for priority sorting
-local MeleeSpecs = {
-    [71] = true, [72] = true, -- Warrior DPS
-    [70] = true, -- Paladin DPS
-    [259] = true, [260] = true, [261] = true, -- Rogue
-    [263] = true, -- Shaman Enhance
-    [268] = true, [269] = true, -- Monk
-    [103] = true, -- Druid Feral
-    [577] = true, [581] = true, -- DH
-    [250] = true, [251] = true, [252] = true, -- DK
-}
-
 -- Event tracking system (ExWind-style)
 local pendingEvents = {
     casts = {},      -- [unit] = { time = timestamp }
     interrupts = {}, -- [unit] = { time = timestamp }
     auras = {},      -- [unit] = { time = timestamp }
 }
-local TIME_WINDOW = 0.100  -- 100ms window for matching events
+local TIME_WINDOW = 0.100 -- 100ms window for matching events
 local processingScheduled = false
 
 -- Local variables
 local bars = {}
-local activeBars = {}  -- [guid] = { bar, unit, name, class, spellID, cd, startTime, specID }
+local activeBars = {} -- [guid] = { bar, unit, name, class, spellID, cd, startTime, specID, role }
 local usedBarsList = {} -- Ordered list for layout
 local container = nil
-local isPreviewing = false
 local interruptStats = {} -- [guid] = count
+local CreateContainer
+local UpdatePartyData
 
 -- Get class color
 local function GetClassColor(class)
@@ -105,24 +122,6 @@ local function GetClassColor(class)
     return colors[class] or {0.5, 0.5, 0.5}
 end
 
--- Get spec priority for sorting
-local function GetSpecPriority(specID)
-    if not specID or specID == 0 then return 999 end
-    
-    local data = InterruptData[specID]
-    if not data then return 999 end
-    
-    local role = data.role or "DAMAGER"
-    local basePriority = (role == "TANK" and 1) or (role == "HEALER" and 2) or 3
-    
-    -- Melee DPS boost
-    if role == "DAMAGER" and MeleeSpecs[specID] then
-        basePriority = basePriority - 0.5
-    end
-    
-    return basePriority
-end
-
 -- Get unit's spec ID (placeholder - would need LibGroupInSpecT for real implementation)
 local function GetUnitSpecID(unit)
     if unit == "player" then
@@ -137,12 +136,12 @@ end
 local function GetUnitInterruptData(unit)
     if not unit then return nil end
     local specID = GetUnitSpecID(unit)
-    
+
     -- If we have spec data, use it
     if specID and specID > 0 and InterruptData[specID] then
         return InterruptData[specID], specID
     end
-    
+
     -- Fallback: try to detect by class
     local _, class = UnitClass(unit)
     if class then
@@ -152,8 +151,87 @@ local function GetUnitInterruptData(unit)
             return data, id
         end
     end
-    
+
     return nil, 0
+end
+
+local function UpdateAnchorVisuals(enabled)
+    local anchor = module.anchor or container
+    if not anchor then return end
+
+    anchor:EnableMouse(enabled)
+    if anchor.editBackdrop then
+        if enabled then
+            anchor.editBackdrop:Show()
+        else
+            anchor.editBackdrop:Hide()
+        end
+    end
+
+    if anchor.editLabel then
+        if enabled then
+            anchor.editLabel:Show()
+        else
+            anchor.editLabel:Hide()
+        end
+    end
+
+    if enabled then
+        anchor:Show()
+    end
+end
+
+function module:SetEditMode(moduleDB, enabled)
+    UpdateAnchorVisuals(enabled)
+end
+
+function module:ResetPosition(moduleDB)
+    moduleDB = moduleDB or db or (addon.db and addon.db.modules and addon.db.modules.InterruptTracker)
+    if not moduleDB then return end
+
+    moduleDB.posX = 0
+    moduleDB.posY = -200
+
+    local anchor = self.anchor or container
+    if anchor then
+        anchor:ClearAllPoints()
+        anchor:SetPoint("CENTER", UIParent, "CENTER", moduleDB.posX, moduleDB.posY)
+    end
+end
+
+function module:buildSettings(panel, helpers, addonRef, moduleDB)
+    local preview = helpers:CreatePreview(panel, Model.BuildPreviewBars(), moduleDB)
+    preview:SetPoint("TOPLEFT", 0, 0)
+
+    local enabledBox = helpers:CreateCheckbox(panel, "Enable Interrupt Tracker", moduleDB.enabled, function(value)
+        addonRef:SetModuleValue("InterruptTracker", "enabled", value)
+    end)
+    enabledBox:SetPoint("TOPLEFT", preview, "BOTTOMLEFT", 0, -16)
+
+    local editButton = helpers:CreateButton(panel, "Open Edit Mode", function()
+        addonRef:SetEditMode(true)
+    end)
+    editButton:SetPoint("TOPLEFT", enabledBox, "BOTTOMLEFT", 4, -12)
+
+    local resetButton = helpers:CreateButton(panel, "Reset Position", function()
+        module:ResetPosition(moduleDB)
+    end)
+    resetButton:SetPoint("TOPLEFT", editButton, "BOTTOMLEFT", 0, -8)
+end
+
+function module:onConfigChanged(addonRef, moduleDB, key)
+    db = moduleDB
+
+    if key == "enabled" then
+        if moduleDB.enabled then
+            CreateContainer()
+            container:Show()
+            UpdateAnchorVisuals(addonRef.db.global.editMode)
+            UpdatePartyData()
+        elseif container then
+            container:Hide()
+        end
+    end
 end
 
 -- Create a cooldown bar
@@ -179,12 +257,12 @@ local function CreateBar(index)
     -- Name text
     bar.nameText = bar:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     bar.nameText:SetPoint("LEFT", bar, "LEFT", db.barHeight + 5, 0)
-    bar.nameText:SetFont("Fonts\\FRIZQT__.TTF", db.fontSize, "OUTLINE")
+    bar.nameText:SetFont("Fonts\\FRIZQT__.TTF", db.nameFontSize or db.fontSize, "OUTLINE")
 
     -- Timer text
     bar.timerText = bar:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     bar.timerText:SetPoint("RIGHT", bar, "RIGHT", -5, 0)
-    bar.timerText:SetFont("Fonts\\FRIZQT__.TTF", db.fontSize, "OUTLINE")
+    bar.timerText:SetFont("Fonts\\FRIZQT__.TTF", db.timerFontSize or db.fontSize, "OUTLINE")
 
     bar:Hide()
     return bar
@@ -193,7 +271,7 @@ end
 -- Update bar visuals
 local function UpdateBarVisuals(bar, data)
     if not bar or not data then return end
-    
+
     -- Update icon
     if db.showIcon then
         bar.icon:SetTexture(C_Spell.GetSpellTexture(data.spellID))
@@ -201,11 +279,11 @@ local function UpdateBarVisuals(bar, data)
     else
         bar.icon:Hide()
     end
-    
+
     -- Update name
     if db.showName then
         bar.nameText:SetText(data.name or "")
-        if db.useClassColor and data.class then
+        if (db.useClassColorBar or db.useClassColor) and data.class then
             local color = GetClassColor(data.class)
             bar.nameText:SetTextColor(unpack(color))
         else
@@ -215,58 +293,40 @@ local function UpdateBarVisuals(bar, data)
     else
         bar.nameText:Hide()
     end
+
+    if db.showTimer then
+        bar.timerText:SetText(db.showReadyText and (db.readyText or "Ready") or "")
+        bar.timerText:Show()
+    else
+        bar.timerText:Hide()
+    end
 end
 
--- Sort bars: Ready by priority, cooling by remaining time
+-- Sort bars: ready bars first, cooling bars by remaining time
 local function SortBars()
-    if isPreviewing then return end
-    
     local sortList = {}
-    for guid, data in pairs(activeBars) do
-        table.insert(sortList, { guid = guid, data = data })
+    for _, data in pairs(activeBars) do
+        table.insert(sortList, data)
     end
-    
-    table.sort(sortList, function(a, b)
-        local aReady = (a.data.startTime == 0 or GetTime() - a.data.startTime >= a.data.cd)
-        local bReady = (b.data.startTime == 0 or GetTime() - b.data.startTime >= b.data.cd)
-        
-        -- One ready, one not: ready first
-        if aReady and not bReady then return true end
-        if not aReady and bReady then return false end
-        
-        -- Both cooling: shorter remaining time first
-        if not aReady and not bReady then
-            local aRemaining = a.data.cd - (GetTime() - a.data.startTime)
-            local bRemaining = b.data.cd - (GetTime() - b.data.startTime)
-            return aRemaining < bRemaining
-        end
-        
-        -- Both ready: sort by priority
-        local aPriority = GetSpecPriority(a.data.specID)
-        local bPriority = GetSpecPriority(b.data.specID)
-        if aPriority ~= bPriority then
-            return aPriority < bPriority
-        end
-        
-        return a.guid < b.guid
-    end)
-    
+
+    Model.SortBars(sortList, GetTime())
+
     wipe(usedBarsList)
-    for _, item in ipairs(sortList) do
-        table.insert(usedBarsList, item.data)
+    for _, data in ipairs(sortList) do
+        table.insert(usedBarsList, data)
     end
 end
 
 -- Layout bars
 local function ReLayout()
     if not container then return end
-    
+
     SortBars()
-    
+
     local spacing = db.spacing
     local growUp = (db.growDirection == "UP")
     local maxLimit = db.maxBars
-    
+
     for i, data in ipairs(usedBarsList) do
         if i > maxLimit then
             data.bar:Hide()
@@ -276,21 +336,23 @@ local function ReLayout()
             if growUp then
                 yOffset = -yOffset
             end
-            
+
             bar:ClearAllPoints()
-            bar:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -yOffset + (growUp and 0 or 0))
+            bar:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -yOffset)
             bar:Show()
         end
     end
 end
 
 -- Create main container
-local function CreateContainer()
+function CreateContainer()
+    if container then return end
+
     container = CreateFrame("Frame", "SunderingToolsInterruptTracker", UIParent)
     container:SetSize(db.barWidth, db.barHeight * db.maxBars)
     container:SetPoint("CENTER", UIParent, "CENTER", db.posX, db.posY)
     container:SetMovable(true)
-    container:EnableMouse(true)
+    container:EnableMouse(false)
     container:RegisterForDrag("LeftButton")
     container:SetScript("OnDragStart", container.StartMoving)
     container:SetScript("OnDragStop", function(self)
@@ -300,23 +362,38 @@ local function CreateContainer()
         db.posY = y
     end)
 
+    container.editBackdrop = container:CreateTexture(nil, "BACKGROUND")
+    container.editBackdrop:SetAllPoints()
+    container.editBackdrop:SetColorTexture(0.1, 0.5, 0.9, 0.18)
+    container.editBackdrop:Hide()
+
+    container.editLabel = container:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    container.editLabel:SetPoint("CENTER")
+    container.editLabel:SetText("Interrupt Tracker")
+    container.editLabel:Hide()
+
     -- Create bars pool
     for i = 1, db.maxBars do
         bars[i] = CreateBar(i)
     end
+
+    module.anchor = container
+    UpdateAnchorVisuals(addon.db and addon.db.global and addon.db.global.editMode)
 end
 
 -- Update party data
-local function UpdatePartyData()
+function UpdatePartyData()
+    if not container then return end
+
     -- Hide existing bars
-    for guid, data in pairs(activeBars) do
+    for _, data in pairs(activeBars) do
         if data.bar then
             data.bar:Hide()
         end
     end
     wipe(activeBars)
     wipe(usedBarsList)
-    
+
     if not IsInGroup() or IsInRaid() then
         ReLayout()
         return
@@ -337,24 +414,26 @@ local function UpdatePartyData()
 
             if interrupt and guid and barIndex <= #bars then
                 local bar = bars[barIndex]
-                
+
                 activeBars[guid] = {
+                    key = guid,
                     bar = bar,
                     unit = unit,
                     name = name,
                     class = class,
+                    role = interrupt.role,
                     spellID = interrupt.spellID,
                     cd = interrupt.cd,
                     specID = specID,
                     startTime = 0,
                 }
-                
+
                 UpdateBarVisuals(bar, activeBars[guid])
                 barIndex = barIndex + 1
             end
         end
     end
-    
+
     ReLayout()
 end
 
@@ -373,7 +452,7 @@ local function TriggerCooldown(unit)
     -- Start cooldown
     data.startTime = GetTime()
     bar:SetValue(0)
-    
+
     ReLayout()
 
     bar:SetScript("OnUpdate", function(self)
@@ -382,7 +461,7 @@ local function TriggerCooldown(unit)
 
         if remaining > 0 then
             self:SetValue(elapsed / cdDuration)
-            
+
             if db.showTimer then
                 -- Show integer when > 6s, decimal when <= 6s
                 if remaining > 6 then
@@ -399,7 +478,7 @@ local function TriggerCooldown(unit)
                     end
                 end
             end
-            
+
             -- Resort every second while cooling
             local lastUpdate = self._lastSortUpdate or 0
             if elapsed - lastUpdate >= 1.0 then
@@ -410,7 +489,11 @@ local function TriggerCooldown(unit)
             -- Cooldown finished
             self:SetValue(1)
             if db.showTimer then
-                self.timerText:SetText("")
+                if db.showReadyText then
+                    self.timerText:SetText(db.readyText or "Ready")
+                else
+                    self.timerText:SetText("")
+                end
             end
             self._lastDisplayed = nil
             self:SetScript("OnUpdate", nil)
@@ -422,16 +505,16 @@ end
 -- Process pending events (ExWind-style matching)
 local function ProcessPendingEvents()
     processingScheduled = false
-    
+
     local currentTime = GetTime()
-    
+
     -- Clean old aura records (> 50ms)
     for unit, data in pairs(pendingEvents.auras) do
         if currentTime - data.time > 0.05 then
             pendingEvents.auras[unit] = nil
         end
     end
-    
+
     -- Check 1: Must have exactly one interrupt (multiple = CC)
     local interruptCount = 0
     local targetUnit = nil
@@ -439,14 +522,14 @@ local function ProcessPendingEvents()
         interruptCount = interruptCount + 1
         targetUnit = unit
     end
-    
+
     if interruptCount == 0 then
         wipe(pendingEvents.interrupts)
         wipe(pendingEvents.casts)
         wipe(pendingEvents.auras)
         return
     end
-    
+
     -- Multiple interrupts = crowd control, ignore
     if interruptCount > 1 then
         wipe(pendingEvents.interrupts)
@@ -454,14 +537,14 @@ local function ProcessPendingEvents()
         wipe(pendingEvents.auras)
         return
     end
-    
+
     -- Check 2: Look for aura changes on the interrupted target (CC detection)
     local interruptTime = pendingEvents.interrupts[targetUnit].time
-    
+
     if pendingEvents.auras[targetUnit] then
         local auraTime = pendingEvents.auras[targetUnit].time
         local auraDiff = math.abs(interruptTime - auraTime)
-        
+
         -- If aura changed within 30ms of interrupt, it's probably a CC
         if auraDiff <= 0.030 then
             wipe(pendingEvents.interrupts)
@@ -470,27 +553,27 @@ local function ProcessPendingEvents()
             return
         end
     end
-    
+
     -- Check 3: Find the caster with closest timing
     local caster = nil
     local bestMatch = nil
     local bestTimeDiff = math.huge
-    
+
     for unit, data in pairs(pendingEvents.casts) do
         local timeDiff = math.abs(interruptTime - data.time)
-        
+
         if timeDiff <= TIME_WINDOW and timeDiff < bestTimeDiff then
             bestMatch = unit
             bestTimeDiff = timeDiff
         end
     end
-    
+
     caster = bestMatch
-    
+
     if caster then
         TriggerCooldown(caster)
     end
-    
+
     -- Clear event cache
     wipe(pendingEvents.interrupts)
     wipe(pendingEvents.casts)
@@ -521,20 +604,20 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
             UpdatePartyData()
             container:Show()
         end
-        
+
     elseif event == "GROUP_ROSTER_UPDATE" then
         if db and db.enabled then
             UpdatePartyData()
         end
-        
+
     elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
         if not db or not db.enabled then return end
-        
+
         local unit, castGUID, spellID = ...
-        
+
         -- Only track player and party
         if not (unit == "player" or string.find(unit, "party")) then return end
-        
+
         -- For player: direct detection by spellID
         if unit == "player" then
             local interruptData = GetUnitInterruptData("player")
@@ -543,28 +626,28 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
             end
             return
         end
-        
+
         -- For party: record cast event for time-window matching
         pendingEvents.casts[unit] = { time = GetTime() }
         ScheduleProcessing()
-        
+
     elseif event == "UNIT_SPELLCAST_INTERRUPTED" then
         if not db or not db.enabled then return end
-        
+
         local unit = ...
         -- Only track nameplate units (enemy casts)
         if not string.find(unit, "nameplate") then return end
-        
+
         pendingEvents.interrupts[unit] = { time = GetTime() }
         ScheduleProcessing()
-        
+
     elseif event == "UNIT_AURA" then
         if not db or not db.enabled then return end
-        
+
         local unit = ...
         -- Only track nameplate units
         if not string.find(unit, "nameplate") then return end
-        
+
         pendingEvents.auras[unit] = { time = GetTime() }
         ScheduleProcessing()
     end
@@ -573,19 +656,19 @@ end)
 -- Print interrupt stats
 local function PrintInterruptStats()
     print("|cffff00ff========== Interrupt Stats ==========|r")
-    
+
     if not next(interruptStats) then
         print("|cffaaaaaa(No data)|r")
         return
     end
-    
+
     local sorted = {}
     for guid, count in pairs(interruptStats) do
         table.insert(sorted, { guid = guid, count = count })
     end
-    
+
     table.sort(sorted, function(a, b) return a.count > b.count end)
-    
+
     for _, data in ipairs(sorted) do
         local name = activeBars[data.guid] and activeBars[data.guid].name or "Unknown"
         print(string.format("|cffffffff%s|r: |cff00ff00%d|r interrupts", name, data.count))
@@ -598,9 +681,9 @@ SlashCmdList["SUNDERINGTOOLS_INT"] = function()
     PrintInterruptStats()
 end
 
--- Expose functions for testing
-addon.InterruptTracker = {
-    UpdateParty = UpdatePartyData,
-    TriggerCD = function(unit) TriggerCooldown(unit) end,
-    PrintStats = PrintInterruptStats,
-}
+module.UpdateParty = UpdatePartyData
+module.TriggerCD = function(unit) TriggerCooldown(unit) end
+module.PrintStats = PrintInterruptStats
+
+addon.InterruptTracker = module
+addon:RegisterModule(module)

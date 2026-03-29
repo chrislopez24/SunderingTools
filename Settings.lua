@@ -47,17 +47,33 @@ function Helpers:CreateButton(parent, label, onClick)
   return button
 end
 
-function Helpers:CreatePreview(parent, previewBars)
+function Helpers:CreatePreview(parent, previewBars, db)
+  local barWidth = (db and db.barWidth) or 240
+  local barHeight = (db and db.barHeight) or 20
+  local spacing = (db and db.spacing) or 4
   local holder = CreateFrame("Frame", nil, parent)
-  holder:SetSize(320, 100)
+  holder:SetSize(barWidth, math.max(0, (#previewBars * (barHeight + spacing)) - spacing))
 
   for index, bar in ipairs(previewBars) do
     local row = CreateFrame("StatusBar", nil, holder)
-    row:SetSize(240, 20)
-    row:SetPoint("TOPLEFT", 0, -((index - 1) * 24))
-    row.text = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    row.text:SetPoint("LEFT", 8, 0)
-    row.text:SetText(bar.name .. "  " .. bar.text)
+    row:SetSize(barWidth, barHeight)
+    row:SetPoint("TOPLEFT", 0, -((index - 1) * (barHeight + spacing)))
+    row:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
+    row:SetStatusBarColor(0.2, 0.8, 0.2)
+    row:SetMinMaxValues(0, 1)
+    row:SetValue(bar.value or 1)
+
+    row.bg = row:CreateTexture(nil, "BACKGROUND")
+    row.bg:SetAllPoints()
+    row.bg:SetColorTexture(0.08, 0.08, 0.08, 0.7)
+
+    row.nameText = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    row.nameText:SetPoint("LEFT", 8, 0)
+    row.nameText:SetText(bar.name or "")
+
+    row.timerText = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    row.timerText:SetPoint("RIGHT", -8, 0)
+    row.timerText:SetText(bar.text or "")
   end
 
   return holder

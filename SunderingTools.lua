@@ -17,6 +17,19 @@ function addon:RegisterModule(moduleDef)
     self.modules[moduleDef.key] = moduleDef
 end
 
+local function GetInterruptTrackerEditHandler(self)
+    local moduleDef = self.modules and self.modules.InterruptTracker
+    if moduleDef and moduleDef.SetEditMode then
+        return moduleDef
+    end
+
+    if self.InterruptTracker and self.InterruptTracker.SetEditMode then
+        return self.InterruptTracker
+    end
+
+    return nil
+end
+
 function addon:BuildDefaults()
     local defaults = {
         global = {
@@ -60,7 +73,7 @@ function addon:SetModuleValue(moduleKey, key, value)
 
     local moduleDef = self.modules[moduleKey]
     if moduleDef and moduleDef.onConfigChanged then
-        moduleDef.onConfigChanged(self, self.db.modules[moduleKey], key)
+        moduleDef:onConfigChanged(self, self.db.modules[moduleKey], key)
     end
 end
 
@@ -93,14 +106,15 @@ function addon:SetMinimapVisible(visible)
 end
 
 function addon:CanOpenEditMode()
-    return self.InterruptTracker ~= nil and self.InterruptTracker.SetEditMode ~= nil
+    return GetInterruptTrackerEditHandler(self) ~= nil
 end
 
 function addon:SetEditMode(enabled)
-    self.db.global.editMode = enabled
+    self.db.global.editMode = enabled and true or false
 
-    if self:CanOpenEditMode() then
-        self.InterruptTracker.SetEditMode(self.db.modules.InterruptTracker, enabled)
+    local tracker = GetInterruptTrackerEditHandler(self)
+    if tracker then
+        tracker.SetEditMode(tracker, self.db.modules.InterruptTracker, self.db.global.editMode)
     end
 end
 
@@ -122,7 +136,12 @@ addon:RegisterModule({
         posX = 0,
         posY = -200,
         fontSize = 14,
+        nameFontSize = 14,
+        timerFontSize = 14,
         useClassColor = true,
+        useClassColorBar = true,
+        showReadyText = false,
+        readyText = "Ready",
     },
 })
 

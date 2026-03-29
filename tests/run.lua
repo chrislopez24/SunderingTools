@@ -1,4 +1,5 @@
 dofile("tests/core/test_registry.lua")
 dofile("tests/core/test_settings_model.lua")
 dofile("tests/core/test_sunderingtools_support.lua")
+dofile("tests/modules/test_interrupt_tracker.lua")
 print("ok")
