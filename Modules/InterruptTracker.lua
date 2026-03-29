@@ -21,10 +21,10 @@ local module = {
         previewWhenSolo = true,
         maxBars = 5,
         growDirection = "DOWN",
-        spacing = 1,
+        spacing = 0,
         iconSize = 18,
-        barWidth = 180,
-        barHeight = 20,
+        barWidth = 175,
+        barHeight = 18,
         fontSize = 11,
     },
 }
@@ -257,9 +257,9 @@ function module:buildSettings(panel, helpers, addonRef, moduleDB)
         panel,
         "Open Edit Mode to move the tracker. Ready bars stay class-colored, and the timer only appears while a kick is recharging.",
         "GameFontHighlight",
-        320
+        340
     )
-    helpText:SetPoint("TOPLEFT", previewWhenSoloBox, "BOTTOMLEFT", 0, -12)
+    helpText:SetPoint("TOPLEFT", fontSizeSlider, "BOTTOMLEFT", 0, -14)
 end
 
 function module:onConfigChanged(addonRef, moduleDB, key)
@@ -355,7 +355,7 @@ local function ConfigureBar(bar)
 
     local borderSize = 1
     local iconSize = math.min(db.iconSize, db.barHeight)
-    local statusLeft = iconSize + 2
+    local statusLeft = iconSize + 3
 
     bar:SetSize(db.barWidth, db.barHeight)
     bar.icon:SetSize(iconSize, iconSize)
@@ -398,22 +398,22 @@ local function ConfigureBar(bar)
     bar.cooldown:ClearAllPoints()
     bar.cooldown:SetPoint("TOPLEFT", bar, "TOPLEFT", statusLeft, -borderSize)
     bar.cooldown:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", -borderSize, borderSize)
-    bar.cooldown.bg:SetColorTexture(0.09, 0.09, 0.11, 0.82)
+    bar.cooldown.bg:SetColorTexture(0.14, 0.14, 0.16, 0.85)
 
     bar.nameText:ClearAllPoints()
-    bar.nameText:SetPoint("LEFT", bar, "LEFT", statusLeft + 4, 0)
-    bar.nameText:SetPoint("RIGHT", bar, "RIGHT", -4, 0)
+    bar.nameText:SetPoint("LEFT", bar, "LEFT", statusLeft + 5, 0)
+    bar.nameText:SetPoint("RIGHT", bar, "RIGHT", -5, 0)
     bar.nameText:SetFont("Fonts\\FRIZQT__.TTF", db.fontSize, "OUTLINE")
     bar.nameText:SetShadowOffset(1, -1)
 
     bar.cooldownNameText:ClearAllPoints()
-    bar.cooldownNameText:SetPoint("LEFT", bar.cooldown, "LEFT", 4, 0)
-    bar.cooldownNameText:SetPoint("RIGHT", bar.cooldownText, "LEFT", -4, 0)
+    bar.cooldownNameText:SetPoint("LEFT", bar.cooldown, "LEFT", 5, 0)
+    bar.cooldownNameText:SetPoint("RIGHT", bar.cooldownText, "LEFT", -5, 0)
     bar.cooldownNameText:SetFont("Fonts\\FRIZQT__.TTF", db.fontSize, "OUTLINE")
     bar.cooldownNameText:SetShadowOffset(1, -1)
 
     bar.cooldownText:ClearAllPoints()
-    bar.cooldownText:SetPoint("RIGHT", bar.cooldown, "RIGHT", -4, 0)
+    bar.cooldownText:SetPoint("RIGHT", bar.cooldown, "RIGHT", -5, 0)
     bar.cooldownText:SetFont("Fonts\\FRIZQT__.TTF", db.fontSize, "OUTLINE")
     bar.cooldownText:SetShadowOffset(1, -1)
 end
@@ -454,7 +454,7 @@ local function UpdateBarVisuals(bar, data)
     local remaining = math.max(0, (data.cd or 0) - (now - data.startTime))
     local progress = 0
     local classColor
-    local textOffset = GetIconOffset() + 4
+    local textOffset = GetIconOffset() + 5
     local readyTextColor = { 1.0, 0.84, 0.22 }
     local activeTextColor = { 1.0, 0.94, 0.74 }
 
@@ -478,7 +478,7 @@ local function UpdateBarVisuals(bar, data)
     if isReady then
         bar.bg:Show()
         bar.cooldown:Hide()
-        bar.bg:SetVertexColor(BlendColor(classColor, 0.32, 0.95))
+        bar.bg:SetVertexColor(BlendColor(classColor, 0.18, 0.95))
         bar.nameText:SetTextColor(readyTextColor[1], readyTextColor[2], readyTextColor[3])
         bar.nameText:Show()
         bar.cooldownNameText:Hide()
@@ -490,7 +490,7 @@ local function UpdateBarVisuals(bar, data)
     else
         bar.bg:Hide()
         bar.cooldown:Show()
-        bar.cooldown:SetStatusBarColor(BlendColor(classColor, 0.22, 1))
+        bar.cooldown:SetStatusBarColor(BlendColor(classColor, 0.14, 1))
         bar.cooldown:SetValue(data.previewValue or progress)
         bar.nameText:Hide()
         bar.cooldownNameText:SetTextColor(activeTextColor[1], activeTextColor[2], activeTextColor[3])
