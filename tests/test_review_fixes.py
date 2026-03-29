@@ -51,11 +51,25 @@ def test_interrupt_tracker_panel_exposes_technical_controls():
         "Show Ready Text",
         "Ready Text",
         "Use Class Color",
+        "Show Preview When Solo",
     ):
         assert label in source
     assert 'addonRef:SetModuleValue("InterruptTracker", "useClassColorBar", value)' in source
+    assert 'addonRef:SetModuleValue("InterruptTracker", "previewWhenSolo", value)' in source
     assert "local function UsesClassColor(moduleDB)" in source
     assert "if UsesClassColor(db) and data.class then" in source
+    assert "local editModePreview = false" in source
+    assert "local function ShouldShowPreview()" in source
+    assert "if editModePreview then" in source
+
+
+def test_bloodlust_sound_uses_exhaustion_aura_instead_of_spellcast_success():
+    source = read("Modules/BloodlustSound.lua")
+    assert "UNIT_SPELLCAST_SUCCEEDED" not in source
+    assert "UNIT_AURA" in source
+    assert "local lastSeenExpirationTime" in source
+    assert "local function CheckFreshExhaustion()" in source
+    assert "if hasFreshExhaustion then" in source
 
 
 def test_runtime_files_do_not_use_dofile_and_models_load_from_toc():

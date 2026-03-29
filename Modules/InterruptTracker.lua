@@ -18,6 +18,7 @@ local module = {
         enabled = true,
         posX = defaultPosX,
         posY = defaultPosY,
+        previewWhenSolo = true,
         maxBars = 5,
         growDirection = "DOWN",
         spacing = 2,
@@ -54,11 +55,44 @@ local activeBars = {} -- [guid] = { bar, unit, name, class, spellID, cd, startTi
 local usedBarsList = {} -- Ordered list for layout
 local container = nil
 local interruptStats = {} -- [guid] = count
+local cooldownState = {} -- [guid] = startTime
+local editModePreview = false
 local CreateContainer
 local EnsureBarPool
 local ReLayout
 local UpdatePartyData
 local UpdateBarVisuals
+
+local function ShouldShowPreview()
+    if not db or not db.enabled then
+        return false
+    end
+
+    if editModePreview then
+        return true
+    end
+
+    return db.previewWhenSolo and (not IsInGroup() or IsInRaid())
+end
+
+local function HasVisibleBars()
+    return next(activeBars) ~= nil
+end
+
+local function UpdateContainerVisibility()
+    if not container or not db then return end
+
+    if not db.enabled then
+        container:Hide()
+        return
+    end
+
+    if editModePreview or HasVisibleBars() then
+        container:Show()
+    else
+        container:Hide()
+    end
+end
 
 local function UsesClassColor(moduleDB)
     if moduleDB.useClassColorBar ~= nil then
@@ -113,6 +147,11 @@ local function UpdateAnchorVisuals(enabled)
 end
 
 function module:SetEditMode(enabled)
+    editModePreview = enabled and true or false
+    if db and db.enabled then
+        CreateContainer()
+        UpdatePartyData()
+    end
     UpdateAnchorVisuals(enabled)
 end
 
@@ -212,15 +251,28 @@ function module:buildSettings(panel, helpers, addonRef, moduleDB)
     end)
     showReadyTextBox:SetPoint("TOPLEFT", showTimerBox, "BOTTOMLEFT", 0, -8)
 
+    local previewWhenSoloBox = helpers:CreateCheckbox(panel, "Show Preview When Solo", moduleDB.previewWhenSolo, function(value)
+        addonRef:SetModuleValue("InterruptTracker", "previewWhenSolo", value)
+    end)
+    previewWhenSoloBox:SetPoint("TOPLEFT", showReadyTextBox, "BOTTOMLEFT", 0, -8)
+
     local nameFontSlider = helpers:CreateSlider(panel, "Name Font Size", 8, 24, 1, moduleDB.nameFontSize, function(value)
         addonRef:SetModuleValue("InterruptTracker", "nameFontSize", value)
     end, 180)
-    nameFontSlider:SetPoint("TOPLEFT", showReadyTextBox, "BOTTOMLEFT", 4, -14)
+    nameFontSlider:SetPoint("TOPLEFT", previewWhenSoloBox, "BOTTOMLEFT", 4, -14)
 
     local timerFontSlider = helpers:CreateSlider(panel, "Timer Font Size", 8, 24, 1, moduleDB.timerFontSize, function(value)
         addonRef:SetModuleValue("InterruptTracker", "timerFontSize", value)
     end, 180)
     timerFontSlider:SetPoint("TOPLEFT", nameFontSlider, "BOTTOMLEFT", 0, -10)
+
+    local helpText = helpers:CreateText(
+        panel,
+        "Open Edit Mode to move the tracker. When solo, Edit Mode forces a preview and this option can keep a preview visible outside groups.",
+        "GameFontHighlight",
+        320
+    )
+    helpText:SetPoint("TOPLEFT", timerFontSlider, "BOTTOMLEFT", 0, -12)
 end
 
 function module:onConfigChanged(addonRef, moduleDB, key)
@@ -229,7 +281,6 @@ function module:onConfigChanged(addonRef, moduleDB, key)
     if key == "enabled" then
         if moduleDB.enabled then
             CreateContainer()
-            container:Show()
             UpdateAnchorVisuals(addonRef.db.global.editMode)
             UpdatePartyData()
         elseif container then
@@ -268,17 +319,13 @@ function module:onConfigChanged(addonRef, moduleDB, key)
         or key == "nameFontSize"
         or key == "timerFontSize"
         or key == "showReadyText"
-        or key == "readyText" then
+        or key == "readyText"
+        or key == "previewWhenSolo" then
         if key == "useClassColorBar" then
             moduleDB.useClassColor = moduleDB.useClassColorBar
         end
         CreateContainer()
-        for _, data in pairs(activeBars) do
-            if data.bar then
-                UpdateBarVisuals(data.bar, data)
-            end
-        end
-        ReLayout()
+        UpdatePartyData()
     end
 end
 
@@ -368,6 +415,7 @@ local function UpdateBarVisuals(bar, data)
     if not bar or not data then return end
 
     ConfigureBar(bar)
+    bar:SetValue(data.previewValue or 1)
 
     -- Update icon
     if db.showIcon then
@@ -392,7 +440,11 @@ local function UpdateBarVisuals(bar, data)
     end
 
     if db.showTimer then
-        bar.timerText:SetText(db.showReadyText and (db.readyText or "Ready") or "")
+        if data.previewText then
+            bar.timerText:SetText(data.previewText)
+        else
+            bar.timerText:SetText(db.showReadyText and (db.readyText or "Ready") or "")
+        end
         bar.timerText:Show()
     else
         bar.timerText:Hide()
@@ -440,6 +492,14 @@ local function ReLayout()
             bar:Show()
         end
     end
+
+    for index = #usedBarsList + 1, #bars do
+        if bars[index] then
+            bars[index]:Hide()
+        end
+    end
+
+    UpdateContainerVisibility()
 end
 
 -- Create main container
@@ -480,20 +540,92 @@ function CreateContainer()
     UpdateAnchorVisuals(addon.db and addon.db.global and addon.db.global.editMode)
 end
 
+local function ResetActiveBars()
+    for _, data in pairs(activeBars) do
+        if data.bar then
+            data.bar:SetScript("OnUpdate", nil)
+            data.bar._lastDisplayed = nil
+            data.bar._lastSortUpdate = nil
+            data.bar:Hide()
+        end
+    end
+
+    wipe(activeBars)
+    wipe(usedBarsList)
+end
+
+local function BuildPreviewBars()
+    local previewBars = {}
+    local now = GetTime()
+
+    for _, previewData in ipairs(Model.BuildPreviewBars()) do
+        local startTime = 0
+        if (previewData.previewRemaining or 0) > 0 and (previewData.cd or 0) > 0 then
+            startTime = now - (previewData.cd - previewData.previewRemaining)
+        end
+
+        previewBars[#previewBars + 1] = {
+            key = previewData.key,
+            name = previewData.name,
+            class = previewData.class,
+            role = previewData.role,
+            spellID = previewData.spellID,
+            cd = previewData.cd or 0,
+            startTime = startTime,
+            previewText = previewData.previewText,
+            previewValue = previewData.previewValue,
+        }
+    end
+
+    return previewBars
+end
+
+local function PopulateBars(entries)
+    ResetActiveBars()
+
+    local barIndex = 1
+    for _, entry in ipairs(entries) do
+        if barIndex > db.maxBars or barIndex > #bars then
+            break
+        end
+
+        local bar = bars[barIndex]
+        local barData = {
+            key = entry.key,
+            bar = bar,
+            unit = entry.unit,
+            name = entry.name,
+            class = entry.class,
+            role = entry.role,
+            spellID = entry.spellID,
+            cd = entry.cd,
+            specID = entry.specID,
+            startTime = entry.startTime or 0,
+            previewText = entry.previewText,
+            previewValue = entry.previewValue,
+        }
+
+        activeBars[barData.key] = barData
+        UpdateBarVisuals(bar, barData)
+        barIndex = barIndex + 1
+    end
+
+    ReLayout()
+end
+
 -- Update party data
 function UpdatePartyData()
     if not container then return end
 
-    -- Hide existing bars
-    for _, data in pairs(activeBars) do
-        if data.bar then
-            data.bar:Hide()
-        end
+    EnsureBarPool()
+
+    if ShouldShowPreview() then
+        PopulateBars(BuildPreviewBars())
+        return
     end
-    wipe(activeBars)
-    wipe(usedBarsList)
 
     if not IsInGroup() or IsInRaid() then
+        ResetActiveBars()
         ReLayout()
         return
     end
@@ -503,20 +635,17 @@ function UpdatePartyData()
         table.insert(units, "party" .. i)
     end
 
-    local barIndex = 1
+    local entries = {}
     for _, unit in ipairs(units) do
-        if UnitExists(unit) and barIndex <= db.maxBars then
+        if UnitExists(unit) and #entries < db.maxBars then
             local guid = UnitGUID(unit)
             local name = UnitName(unit)
             local _, class = UnitClass(unit)
             local interrupt, specID = GetUnitInterruptData(unit)
 
-            if interrupt and guid and barIndex <= #bars then
-                local bar = bars[barIndex]
-
-                activeBars[guid] = {
+            if interrupt and guid then
+                entries[#entries + 1] = {
                     key = guid,
-                    bar = bar,
                     unit = unit,
                     name = name,
                     class = class,
@@ -524,16 +653,13 @@ function UpdatePartyData()
                     spellID = interrupt.spellID,
                     cd = interrupt.cd,
                     specID = specID,
-                    startTime = 0,
+                    startTime = cooldownState[guid] or 0,
                 }
-
-                UpdateBarVisuals(bar, activeBars[guid])
-                barIndex = barIndex + 1
             end
         end
     end
 
-    ReLayout()
+    PopulateBars(entries)
 end
 
 -- Trigger cooldown
@@ -550,6 +676,7 @@ local function TriggerCooldown(unit)
 
     -- Start cooldown
     data.startTime = GetTime()
+    cooldownState[guid] = data.startTime
     bar:SetValue(0)
 
     ReLayout()
@@ -578,6 +705,7 @@ local function TriggerCooldown(unit)
         else
             -- Cooldown finished
             self:SetValue(1)
+            cooldownState[guid] = nil
             if db.showTimer then
                 if db.showReadyText then
                     self.timerText:SetText(db.readyText or "Ready")
@@ -692,7 +820,6 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         if db.enabled then
             CreateContainer()
             UpdatePartyData()
-            container:Show()
         end
 
     elseif event == "GROUP_ROSTER_UPDATE" then

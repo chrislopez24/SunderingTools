@@ -153,9 +153,39 @@ end
 
 function Model.BuildPreviewBars()
   return {
-    { key = "tank-ready", name = "TankKick", role = "TANK", text = "Ready", value = 1 },
-    { key = "melee", name = "MeleeKick", role = "DAMAGER", text = "7.4", value = 0.45 },
-    { key = "ranged", name = "RangedKick", role = "DAMAGER", text = "13", value = 0.2 },
+    {
+      key = "tank-ready",
+      name = "TankKick",
+      class = "PALADIN",
+      role = "TANK",
+      spellID = 96231,
+      previewText = "Ready",
+      previewValue = 1,
+      cd = 15,
+      previewRemaining = 0,
+    },
+    {
+      key = "melee",
+      name = "MeleeKick",
+      class = "ROGUE",
+      role = "DAMAGER",
+      spellID = 1766,
+      previewText = "7.4",
+      previewValue = 0.45,
+      cd = 15,
+      previewRemaining = 7.4,
+    },
+    {
+      key = "ranged",
+      name = "RangedKick",
+      class = "MAGE",
+      role = "DAMAGER",
+      spellID = 2139,
+      previewText = "13",
+      previewValue = 0.2,
+      cd = 20,
+      previewRemaining = 13,
+    },
   }
 end
 

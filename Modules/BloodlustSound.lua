@@ -27,16 +27,6 @@ local module = {
 
 local db = addon.db and addon.db.BloodlustSound
 
-local BloodlustSpells = {
-  2825,   -- Bloodlust (Shaman)
-  32182,  -- Heroism (Shaman)
-  80353,  -- Time Warp (Mage)
-  90355,  -- Ancient Hysteria (Hunter - Core Hound)
-  160452, -- Netherwinds (Hunter - Nether Ray)
-  264667, -- Primal Rage (Hunter - Ferocity)
-  390386, -- Fury of the Aspects (Evoker)
-}
-
 local ExhaustionIDs = {
   57723,  -- Exhaustion
   57724,  -- Sated
@@ -47,22 +37,43 @@ local ExhaustionIDs = {
   264689, -- Fatigued
   390435, -- Exhaustion (Evoker)
 }
+local ExhaustionDuration = 600
+local ExhaustionFreshWindow = 5
 
 local frame
 local activeTimer
-local pendingTrigger
+local lastSeenExpirationTime
 
 local function CheckExhaustion()
   for _, spellID in ipairs(ExhaustionIDs) do
     local aura = C_UnitAuras.GetPlayerAuraBySpellID(spellID)
     if aura then
-      local remaining = aura.expirationTime - GetTime()
-      if remaining >= 595 then
-        return true, aura.expirationTime
-      end
+      return true, aura.expirationTime
     end
   end
 
+  return false, nil
+end
+
+local function CheckFreshExhaustion()
+  for _, spellID in ipairs(ExhaustionIDs) do
+    local aura = C_UnitAuras.GetPlayerAuraBySpellID(spellID)
+    if aura then
+      local remaining = aura.expirationTime - GetTime()
+      if remaining >= (ExhaustionDuration - ExhaustionFreshWindow) then
+        if aura.expirationTime ~= lastSeenExpirationTime then
+          lastSeenExpirationTime = aura.expirationTime
+          return true, aura.expirationTime
+        end
+        return false, aura.expirationTime
+      end
+
+      lastSeenExpirationTime = aura.expirationTime
+      return false, aura.expirationTime
+    end
+  end
+
+  lastSeenExpirationTime = nil
   return false, nil
 end
 
@@ -119,13 +130,6 @@ local function EnsureFrame()
   return frame
 end
 
-local function CancelPendingTrigger()
-  if pendingTrigger then
-    pendingTrigger:Cancel()
-    pendingTrigger = nil
-  end
-end
-
 function module:ResetPosition(moduleDB)
   moduleDB = moduleDB or db or (addon.db and addon.db.modules and addon.db.modules.BloodlustSound)
   if not moduleDB then return end
@@ -140,8 +144,6 @@ function module:ResetPosition(moduleDB)
 end
 
 local function StopEffect()
-  CancelPendingTrigger()
-
   if module.lastHandle then
     StopSound(module.lastHandle)
     module.lastHandle = nil
@@ -299,7 +301,6 @@ end
 local eventFrame = CreateFrame("Frame")
 
 eventFrame:RegisterEvent("PLAYER_LOGIN")
-eventFrame:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
 eventFrame:RegisterEvent("UNIT_AURA")
 
 eventFrame:SetScript("OnEvent", function(_, event, ...)
@@ -307,23 +308,10 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
     db = addon.db.BloodlustSound
     if db and db.enabled then
       EnsureFrame()
-    end
-    return
-  end
-
-  if event == "UNIT_SPELLCAST_SUCCEEDED" then
-    local _, _, spellID = ...
-    for _, id in ipairs(BloodlustSpells) do
-      if spellID == id then
-        CancelPendingTrigger()
-        pendingTrigger = C_Timer.NewTimer(0.5, function()
-          pendingTrigger = nil
-          local hasExhaustion, expiration = CheckExhaustion()
-          if hasExhaustion then
-            PlayEffect(expiration)
-          end
-        end)
-        break
+      local hasExhaustion, expiration = CheckExhaustion()
+      if hasExhaustion then
+        lastSeenExpirationTime = expiration
+        PlayEffect(expiration)
       end
     end
     return
@@ -332,8 +320,8 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
   if event == "UNIT_AURA" then
     local unitTarget = ...
     if unitTarget == "player" then
-      local hasExhaustion, expiration = CheckExhaustion()
-      if hasExhaustion and (not activeTimer or not frame or not frame:IsShown()) then
+      local hasFreshExhaustion, expiration = CheckFreshExhaustion()
+      if hasFreshExhaustion then
         PlayEffect(expiration)
       end
     end
