@@ -89,6 +89,13 @@ local function UsesClassColor(moduleDB)
     return moduleDB.useClassColor ~= false
 end
 
+local function BlendColor(color, darkness, alpha)
+    local r = (color[1] * (1 - darkness)) + (0.08 * darkness)
+    local g = (color[2] * (1 - darkness)) + (0.08 * darkness)
+    local b = (color[3] * (1 - darkness)) + (0.08 * darkness)
+    return r, g, b, alpha or 1
+end
+
 local function GetIconOffset()
     return math.min(db.iconSize, db.barHeight) + 2
 end
@@ -304,10 +311,13 @@ local function CreateBar(index)
 
     bar.icon = bar:CreateTexture(nil, "ARTWORK")
     bar.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    bar.iconBorder = bar:CreateTexture(nil, "BORDER")
+    bar.iconBorder:SetColorTexture(0, 0, 0, 1)
 
     bar.borderTop = bar:CreateTexture(nil, "BORDER")
     bar.borderBottom = bar:CreateTexture(nil, "BORDER")
     bar.borderRight = bar:CreateTexture(nil, "BORDER")
+    bar.separator = bar:CreateTexture(nil, "BORDER")
 
     bar.cooldown = CreateFrame("StatusBar", nil, bar)
     bar.cooldown:SetMinMaxValues(0, 1)
@@ -346,6 +356,11 @@ local function ConfigureBar(bar)
     bar.icon:ClearAllPoints()
     bar.icon:SetPoint("LEFT", bar, "LEFT", 0, 0)
 
+    bar.iconBorder:ClearAllPoints()
+    bar.iconBorder:SetPoint("TOPLEFT", bar.icon, "TOPRIGHT", 0, 0)
+    bar.iconBorder:SetPoint("BOTTOMLEFT", bar.icon, "BOTTOMRIGHT", 0, 0)
+    bar.iconBorder:SetWidth(borderSize)
+
     bar.bg:ClearAllPoints()
     bar.bg:SetPoint("TOPLEFT", bar, "TOPLEFT", statusLeft, 0)
     bar.bg:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", 0, 0)
@@ -368,6 +383,12 @@ local function ConfigureBar(bar)
     bar.borderRight:SetWidth(borderSize)
     bar.borderRight:SetColorTexture(0, 0, 0, 1)
 
+    bar.separator:ClearAllPoints()
+    bar.separator:SetPoint("TOPLEFT", bar, "TOPLEFT", statusLeft, borderSize)
+    bar.separator:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", statusLeft, -borderSize)
+    bar.separator:SetWidth(borderSize)
+    bar.separator:SetColorTexture(0, 0, 0, 1)
+
     bar.cooldown:ClearAllPoints()
     bar.cooldown:SetPoint("TOPLEFT", bar, "TOPLEFT", statusLeft, -borderSize)
     bar.cooldown:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", -borderSize, borderSize)
@@ -376,19 +397,19 @@ local function ConfigureBar(bar)
     bar.nameText:ClearAllPoints()
     bar.nameText:SetPoint("LEFT", bar, "LEFT", statusLeft + 4, 0)
     bar.nameText:SetPoint("RIGHT", bar, "RIGHT", -4, 0)
-    bar.nameText:SetFont("Fonts\\FRIZQT__.TTF", db.fontSize, "")
-    bar.nameText:SetShadowOffset(0, 0)
+    bar.nameText:SetFont("Fonts\\FRIZQT__.TTF", db.fontSize, "OUTLINE")
+    bar.nameText:SetShadowOffset(1, -1)
 
     bar.cooldownNameText:ClearAllPoints()
     bar.cooldownNameText:SetPoint("LEFT", bar.cooldown, "LEFT", 4, 0)
     bar.cooldownNameText:SetPoint("RIGHT", bar.cooldownText, "LEFT", -4, 0)
-    bar.cooldownNameText:SetFont("Fonts\\FRIZQT__.TTF", db.fontSize, "")
-    bar.cooldownNameText:SetShadowOffset(0, 0)
+    bar.cooldownNameText:SetFont("Fonts\\FRIZQT__.TTF", db.fontSize, "OUTLINE")
+    bar.cooldownNameText:SetShadowOffset(1, -1)
 
     bar.cooldownText:ClearAllPoints()
     bar.cooldownText:SetPoint("RIGHT", bar.cooldown, "RIGHT", -4, 0)
-    bar.cooldownText:SetFont("Fonts\\FRIZQT__.TTF", db.fontSize, "")
-    bar.cooldownText:SetShadowOffset(0, 0)
+    bar.cooldownText:SetFont("Fonts\\FRIZQT__.TTF", db.fontSize, "OUTLINE")
+    bar.cooldownText:SetShadowOffset(1, -1)
 end
 
 local function RefreshContainerGeometry()
@@ -449,7 +470,7 @@ local function UpdateBarVisuals(bar, data)
     if isReady then
         bar.bg:Show()
         bar.cooldown:Hide()
-        bar.bg:SetVertexColor(classColor[1], classColor[2], classColor[3], 0.9)
+        bar.bg:SetVertexColor(BlendColor(classColor, 0.32, 0.95))
         bar.nameText:SetTextColor(0.06, 0.06, 0.06)
         bar.nameText:Show()
         bar.cooldownNameText:Hide()
@@ -461,7 +482,7 @@ local function UpdateBarVisuals(bar, data)
     else
         bar.bg:Hide()
         bar.cooldown:Show()
-        bar.cooldown:SetStatusBarColor(classColor[1], classColor[2], classColor[3], 1)
+        bar.cooldown:SetStatusBarColor(BlendColor(classColor, 0.22, 1))
         bar.cooldown:SetValue(data.previewValue or progress)
         bar.nameText:Hide()
         bar.cooldownNameText:SetTextColor(0.94, 0.94, 0.94)
