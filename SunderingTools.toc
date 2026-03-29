@@ -8,8 +8,10 @@
 # Core
 Core\Config.lua
 Core\Registry.lua
+Core\SettingsModel.lua
 SunderingTools.lua
 Settings.lua
+MinimapButton.lua
 
 # Modules
 Modules\InterruptTracker.lua

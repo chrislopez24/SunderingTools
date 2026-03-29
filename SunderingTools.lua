@@ -4,6 +4,7 @@
 local addonName, addon = ...
 local Config = _G.SunderingToolsConfig or dofile("Core/Config.lua")
 local Registry = _G.SunderingToolsRegistry or dofile("Core/Registry.lua")
+local SettingsModel = _G.SunderingToolsSettingsModel or dofile("Core/SettingsModel.lua")
 
 _G.SunderingTools = addon
 
@@ -63,6 +64,18 @@ function addon:SetModuleValue(moduleKey, key, value)
     end
 end
 
+function addon:GetSettingsSections()
+    return SettingsModel.BuildSections(self.registry:List())
+end
+
+function addon:SetEditMode(enabled)
+    self.db.global.editMode = enabled
+
+    if self.InterruptTracker and self.InterruptTracker.SetEditMode then
+        self.InterruptTracker.SetEditMode(self.db.modules.InterruptTracker, enabled)
+    end
+end
+
 addon:RegisterModule({
     key = "InterruptTracker",
     order = 10,
@@ -107,8 +120,7 @@ function addon:InitMinimapIcon()
     local LDBIcon = LDB and LibStub("LibDBIcon-1.0", true)
 
     if not LDB or not LDBIcon then
-        -- Fallback: create a simple minimap button if libraries not available
-        self:CreateSimpleMinimapButton()
+        self:CreateMinimapButton()
         return
     end
 
@@ -137,70 +149,6 @@ function addon:InitMinimapIcon()
     -- Register with LibDBIcon
     LDBIcon:Register("SunderingTools", dataObject, self.db.global.minimap)
     self.minimapIcon = LDBIcon
-end
-
--- Simple minimap button (fallback)
-function addon:CreateSimpleMinimapButton()
-    local button = CreateFrame("Button", "SunderingToolsMinimapButton", Minimap)
-    button:SetSize(32, 32)
-    button:SetFrameStrata("MEDIUM")
-    button:SetFrameLevel(8)
-    button:SetPoint("TOPLEFT", Minimap, "TOPLEFT", 0, 0)
-
-    -- Icon
-    button.icon = button:CreateTexture(nil, "BACKGROUND")
-    button.icon:SetSize(20, 20)
-    button.icon:SetPoint("CENTER", 0, 0)
-    button.icon:SetTexture("Interface\\Icons\\Ability_Warrior_PunishingBlow")
-
-    -- Border
-    button.border = button:CreateTexture(nil, "OVERLAY")
-    button.border:SetSize(54, 54)
-    button.border:SetPoint("CENTER", 0, 0)
-    button.border:SetTexture("Interface\\Minimap\\MiniMap-TrackingBorder")
-
-    -- Highlight
-    button:SetHighlightTexture("Interface\\Minimap\\UI-Minimap-ZoomButton-Highlight")
-
-    button:SetScript("OnClick", function(self, button)
-        if button == "LeftButton" then
-            addon:OpenSettings()
-        elseif button == "RightButton" then
-            addon:ShowQuickMenu()
-        end
-    end)
-
-    button:SetScript("OnEnter", function(self)
-        GameTooltip:SetOwner(self, "ANCHOR_LEFT")
-        GameTooltip:AddLine("|cff00ff00SunderingTools|r")
-        GameTooltip:AddLine("Left-click: Open settings")
-        GameTooltip:AddLine("Right-click: Quick menu")
-        GameTooltip:Show()
-    end)
-
-    button:SetScript("OnLeave", function()
-        GameTooltip:Hide()
-    end)
-
-    -- Make draggable around minimap
-    button:RegisterForDrag("LeftButton")
-    button:SetScript("OnDragStart", function(self)
-        self:SetScript("OnUpdate", function()
-            local xpos, ypos = GetCursorPosition()
-            local xmin, ymin = Minimap:GetLeft(), Minimap:GetBottom()
-            local scale = Minimap:GetEffectiveScale()
-            xpos = (xpos / scale - xmin - 70) / 1.1
-            ypos = (ypos / scale - ymin - 70) / 1.1
-            local angle = math.deg(math.atan2(ypos, xpos))
-            self:SetPoint("TOPLEFT", Minimap, "TOPLEFT", 54 * cos(angle), -54 * sin(angle))
-        end)
-    end)
-
-    button:SetScript("OnDragStop", function(self)
-        self:SetScript("OnUpdate", nil)
-    end)
-
-    self.minimapButton = button
 end
 
 -- Show quick toggle menu
