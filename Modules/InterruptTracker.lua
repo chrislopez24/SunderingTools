@@ -85,6 +85,16 @@ local function UpdateContainerVisibility()
     end
 end
 
+local function UpdateEditLabelVisibility(enabled)
+    if not container or not container.editLabel then return end
+
+    if enabled and not HasVisibleBars() then
+        container.editLabel:Show()
+    else
+        container.editLabel:Hide()
+    end
+end
+
 local function UsesClassColor(moduleDB)
     return moduleDB.useClassColor ~= false
 end
@@ -140,11 +150,7 @@ local function UpdateAnchorVisuals(enabled)
     end
 
     if anchor.editLabel then
-        if enabled then
-            anchor.editLabel:Show()
-        else
-            anchor.editLabel:Hide()
-        end
+        UpdateEditLabelVisibility(enabled)
     end
 
     if enabled then
@@ -449,6 +455,8 @@ local function UpdateBarVisuals(bar, data)
     local progress = 0
     local classColor
     local textOffset = GetIconOffset() + 4
+    local readyTextColor = { 1.0, 0.84, 0.22 }
+    local activeTextColor = { 1.0, 0.94, 0.74 }
 
     if UsesClassColor(db) and data.class then
         classColor = Model.GetClassColor(data.class)
@@ -471,7 +479,7 @@ local function UpdateBarVisuals(bar, data)
         bar.bg:Show()
         bar.cooldown:Hide()
         bar.bg:SetVertexColor(BlendColor(classColor, 0.32, 0.95))
-        bar.nameText:SetTextColor(0.06, 0.06, 0.06)
+        bar.nameText:SetTextColor(readyTextColor[1], readyTextColor[2], readyTextColor[3])
         bar.nameText:Show()
         bar.cooldownNameText:Hide()
         bar.nameText:ClearAllPoints()
@@ -485,7 +493,7 @@ local function UpdateBarVisuals(bar, data)
         bar.cooldown:SetStatusBarColor(BlendColor(classColor, 0.22, 1))
         bar.cooldown:SetValue(data.previewValue or progress)
         bar.nameText:Hide()
-        bar.cooldownNameText:SetTextColor(0.94, 0.94, 0.94)
+        bar.cooldownNameText:SetTextColor(activeTextColor[1], activeTextColor[2], activeTextColor[3])
         bar.cooldownNameText:Show()
 
         local timerText = data.previewText
@@ -496,7 +504,7 @@ local function UpdateBarVisuals(bar, data)
             timerText = timerText[1]
         end
         bar.cooldownText:SetText(timerText or "")
-        bar.cooldownText:SetTextColor(0.94, 0.94, 0.94)
+        bar.cooldownText:SetTextColor(activeTextColor[1], activeTextColor[2], activeTextColor[3])
         bar.cooldownText:Show()
     end
 end
@@ -550,6 +558,7 @@ local function ReLayout()
     end
 
     UpdateContainerVisibility()
+    UpdateEditLabelVisibility(addon.db and addon.db.global and addon.db.global.editMode)
 end
 
 -- Create main container
