@@ -33,6 +33,10 @@ def test_general_panel_includes_help_and_reset_all():
     assert 'button:SetText(addon.db.global.editMode and "Lock Tracker" or "Open Edit Mode")' in source
     assert "addon:SetEditMode(not addon.db.global.editMode)" in source
     assert "addon:SetEditMode(false)" in source
+    assert 'frame:SetMovable(true)' in source
+    assert 'frame:RegisterForDrag("LeftButton")' in source
+    assert 'frame:SetScript("OnDragStart", frame.StartMoving)' in source
+    assert 'frame:SetScript("OnDragStop", function(self)' in source
 
 
 def test_interrupt_tracker_panel_exposes_technical_controls():
@@ -61,6 +65,9 @@ def test_interrupt_tracker_panel_exposes_technical_controls():
     assert "local editModePreview = false" in source
     assert "local function ShouldShowPreview()" in source
     assert "if editModePreview then" in source
+    assert "container.dragHandle = CreateFrame(\"Frame\", nil, container)" in source
+    assert "container.dragHandle:SetAllPoints()" in source
+    assert "container.dragHandle:RegisterForDrag(\"LeftButton\")" in source
 
 
 def test_bloodlust_sound_uses_exhaustion_aura_instead_of_spellcast_success():

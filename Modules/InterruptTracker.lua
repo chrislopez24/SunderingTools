@@ -125,6 +125,14 @@ local function UpdateAnchorVisuals(enabled)
     if not anchor then return end
 
     anchor:EnableMouse(enabled)
+    if anchor.dragHandle then
+        anchor.dragHandle:EnableMouse(enabled)
+        if enabled then
+            anchor.dragHandle:Show()
+        else
+            anchor.dragHandle:Hide()
+        end
+    end
     if anchor.editBackdrop then
         if enabled then
             anchor.editBackdrop:Show()
@@ -516,13 +524,22 @@ function CreateContainer()
     container:SetMovable(true)
     container:EnableMouse(false)
     container:RegisterForDrag("LeftButton")
-    container:SetScript("OnDragStart", container.StartMoving)
-    container:SetScript("OnDragStop", function(self)
-        self:StopMovingOrSizing()
-        local _, _, _, x, y = self:GetPoint()
+
+    container.dragHandle = CreateFrame("Frame", nil, container)
+    container.dragHandle:SetAllPoints()
+    container.dragHandle:SetFrameStrata("HIGH")
+    container.dragHandle:EnableMouse(false)
+    container.dragHandle:RegisterForDrag("LeftButton")
+    container.dragHandle:SetScript("OnDragStart", function()
+        container:StartMoving()
+    end)
+    container.dragHandle:SetScript("OnDragStop", function()
+        container:StopMovingOrSizing()
+        local _, _, _, x, y = container:GetPoint()
         db.posX = x
         db.posY = y
     end)
+    container.dragHandle:Hide()
 
     container.editBackdrop = container:CreateTexture(nil, "BACKGROUND")
     container.editBackdrop:SetAllPoints()
