@@ -47,19 +47,14 @@ def test_interrupt_tracker_panel_exposes_technical_controls():
         "Bar Spacing",
         "Bar Width",
         "Bar Height",
-        "Show Icon",
-        "Show Name",
-        "Show Timer",
-        "Name Font Size",
-        "Timer Font Size",
-        "Show Ready Text",
-        "Ready Text",
-        "Use Class Color",
+        "Icon Size",
+        "Font Size",
         "Show Preview When Solo",
     ):
         assert label in source
-    assert 'addonRef:SetModuleValue("InterruptTracker", "useClassColorBar", value)' in source
     assert 'addonRef:SetModuleValue("InterruptTracker", "previewWhenSolo", value)' in source
+    assert 'addonRef:SetModuleValue("InterruptTracker", "iconSize", value)' in source
+    assert 'addonRef:SetModuleValue("InterruptTracker", "fontSize", value)' in source
     assert "local function UsesClassColor(moduleDB)" in source
     assert "if UsesClassColor(db) and data.class then" in source
     assert "local editModePreview = false" in source
@@ -68,6 +63,24 @@ def test_interrupt_tracker_panel_exposes_technical_controls():
     assert "container.dragHandle = CreateFrame(\"Frame\", nil, container)" in source
     assert "container.dragHandle:SetAllPoints()" in source
     assert "container.dragHandle:RegisterForDrag(\"LeftButton\")" in source
+    assert "bar.borderTop" in source
+    assert "bar.borderBottom" in source
+    assert "bar.borderRight" in source
+    assert "bar.cooldown = CreateFrame(\"StatusBar\", nil, bar)" in source
+    assert "bar.cooldownText = bar.cooldown:CreateFontString(nil, \"OVERLAY\", \"GameFontNormal\")" in source
+
+    for removed in (
+        "Name Font Size",
+        "Timer Font Size",
+        "Show Ready Text",
+        "Ready Text",
+        "Use Class Color",
+        "Show Icon",
+        "Show Name",
+        "Show Timer",
+        'addonRef:SetModuleValue("InterruptTracker", "useClassColorBar", value)',
+    ):
+        assert removed not in source
 
 
 def test_bloodlust_sound_uses_exhaustion_aura_instead_of_spellcast_success():

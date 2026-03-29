@@ -21,20 +21,11 @@ local module = {
         previewWhenSolo = true,
         maxBars = 5,
         growDirection = "DOWN",
-        spacing = 2,
-        iconSize = 24,
-        barWidth = 150,
-        barHeight = 24,
-        showIcon = true,
-        showName = true,
-        showTimer = true,
-        useClassColor = true,
-        useClassColorBar = true,
-        fontSize = 14,
-        nameFontSize = 14,
-        timerFontSize = 14,
-        showReadyText = false,
-        readyText = "Ready",
+        spacing = 1,
+        iconSize = 18,
+        barWidth = 180,
+        barHeight = 20,
+        fontSize = 11,
     },
 }
 
@@ -95,11 +86,11 @@ local function UpdateContainerVisibility()
 end
 
 local function UsesClassColor(moduleDB)
-    if moduleDB.useClassColorBar ~= nil then
-        return moduleDB.useClassColorBar
-    end
+    return moduleDB.useClassColor ~= false
+end
 
-    return moduleDB.useClassColor
+local function GetIconOffset()
+    return math.min(db.iconSize, db.barHeight) + 2
 end
 
 -- Get unit's spec ID (placeholder - would need LibGroupInSpecT for real implementation)
@@ -179,13 +170,18 @@ end
 function module:buildSettings(panel, helpers, addonRef, moduleDB)
     db = moduleDB
 
-    local preview = helpers:CreatePreview(panel, Model.BuildPreviewBars(), moduleDB)
-    preview:SetPoint("TOPLEFT", 0, 0)
+    local introText = helpers:CreateText(
+        panel,
+        "OmniCD-style interrupt bars with live preview in Edit Mode.",
+        "GameFontHighlight",
+        320
+    )
+    introText:SetPoint("TOPLEFT", 0, 0)
 
     local enabledBox = helpers:CreateCheckbox(panel, "Enable Interrupt Tracker", moduleDB.enabled, function(value)
         addonRef:SetModuleValue("InterruptTracker", "enabled", value)
     end)
-    enabledBox:SetPoint("TOPLEFT", preview, "BOTTOMLEFT", 0, -16)
+    enabledBox:SetPoint("TOPLEFT", introText, "BOTTOMLEFT", 0, -16)
 
     local editButton = helpers:CreateButton(panel, "Open Edit Mode", function()
         addonRef:SetEditMode(true)
@@ -229,58 +225,28 @@ function module:buildSettings(panel, helpers, addonRef, moduleDB)
     end, 180)
     barHeightSlider:SetPoint("TOPLEFT", barWidthSlider, "BOTTOMLEFT", 0, -10)
 
-    local readyTextInput = helpers:CreateEditBox(panel, "Ready Text", 180, moduleDB.readyText or "", function(value)
-        addonRef:SetModuleValue("InterruptTracker", "readyText", value)
-    end)
-    readyTextInput:SetPoint("TOPLEFT", barHeightSlider, "BOTTOMLEFT", -4, -8)
+    local iconSizeSlider = helpers:CreateSlider(panel, "Icon Size", 14, 32, 1, moduleDB.iconSize, function(value)
+        addonRef:SetModuleValue("InterruptTracker", "iconSize", value)
+    end, 180)
+    iconSizeSlider:SetPoint("TOPLEFT", barHeightSlider, "BOTTOMLEFT", 0, -10)
 
-    local showIconBox = helpers:CreateCheckbox(panel, "Show Icon", moduleDB.showIcon, function(value)
-        addonRef:SetModuleValue("InterruptTracker", "showIcon", value)
-    end)
-    showIconBox:SetPoint("TOPLEFT", maxBarsSlider, "TOPRIGHT", 24, -2)
-
-    local showNameBox = helpers:CreateCheckbox(panel, "Show Name", moduleDB.showName, function(value)
-        addonRef:SetModuleValue("InterruptTracker", "showName", value)
-    end)
-    showNameBox:SetPoint("TOPLEFT", showIconBox, "BOTTOMLEFT", 0, -8)
-
-    local useClassColorBox = helpers:CreateCheckbox(panel, "Use Class Color", UsesClassColor(moduleDB), function(value)
-        addonRef:SetModuleValue("InterruptTracker", "useClassColorBar", value)
-    end)
-    useClassColorBox:SetPoint("TOPLEFT", showNameBox, "BOTTOMLEFT", 0, -8)
-
-    local showTimerBox = helpers:CreateCheckbox(panel, "Show Timer", moduleDB.showTimer, function(value)
-        addonRef:SetModuleValue("InterruptTracker", "showTimer", value)
-    end)
-    showTimerBox:SetPoint("TOPLEFT", useClassColorBox, "BOTTOMLEFT", 0, -8)
-
-    local showReadyTextBox = helpers:CreateCheckbox(panel, "Show Ready Text", moduleDB.showReadyText, function(value)
-        addonRef:SetModuleValue("InterruptTracker", "showReadyText", value)
-    end)
-    showReadyTextBox:SetPoint("TOPLEFT", showTimerBox, "BOTTOMLEFT", 0, -8)
+    local fontSizeSlider = helpers:CreateSlider(panel, "Font Size", 8, 18, 1, moduleDB.fontSize, function(value)
+        addonRef:SetModuleValue("InterruptTracker", "fontSize", value)
+    end, 180)
+    fontSizeSlider:SetPoint("TOPLEFT", iconSizeSlider, "BOTTOMLEFT", 0, -10)
 
     local previewWhenSoloBox = helpers:CreateCheckbox(panel, "Show Preview When Solo", moduleDB.previewWhenSolo, function(value)
         addonRef:SetModuleValue("InterruptTracker", "previewWhenSolo", value)
     end)
-    previewWhenSoloBox:SetPoint("TOPLEFT", showReadyTextBox, "BOTTOMLEFT", 0, -8)
-
-    local nameFontSlider = helpers:CreateSlider(panel, "Name Font Size", 8, 24, 1, moduleDB.nameFontSize, function(value)
-        addonRef:SetModuleValue("InterruptTracker", "nameFontSize", value)
-    end, 180)
-    nameFontSlider:SetPoint("TOPLEFT", previewWhenSoloBox, "BOTTOMLEFT", 4, -14)
-
-    local timerFontSlider = helpers:CreateSlider(panel, "Timer Font Size", 8, 24, 1, moduleDB.timerFontSize, function(value)
-        addonRef:SetModuleValue("InterruptTracker", "timerFontSize", value)
-    end, 180)
-    timerFontSlider:SetPoint("TOPLEFT", nameFontSlider, "BOTTOMLEFT", 0, -10)
+    previewWhenSoloBox:SetPoint("TOPLEFT", maxBarsSlider, "TOPRIGHT", 24, -2)
 
     local helpText = helpers:CreateText(
         panel,
-        "Open Edit Mode to move the tracker. When solo, Edit Mode forces a preview and this option can keep a preview visible outside groups.",
+        "Open Edit Mode to move the tracker. Ready bars stay class-colored, and the timer only appears while a kick is recharging.",
         "GameFontHighlight",
         320
     )
-    helpText:SetPoint("TOPLEFT", timerFontSlider, "BOTTOMLEFT", 0, -12)
+    helpText:SetPoint("TOPLEFT", previewWhenSoloBox, "BOTTOMLEFT", 0, -12)
 end
 
 function module:onConfigChanged(addonRef, moduleDB, key)
@@ -320,18 +286,9 @@ function module:onConfigChanged(addonRef, moduleDB, key)
         or key == "spacing"
         or key == "barWidth"
         or key == "barHeight"
-        or key == "showIcon"
-        or key == "showName"
-        or key == "useClassColorBar"
-        or key == "showTimer"
-        or key == "nameFontSize"
-        or key == "timerFontSize"
-        or key == "showReadyText"
-        or key == "readyText"
+        or key == "iconSize"
+        or key == "fontSize"
         or key == "previewWhenSolo" then
-        if key == "useClassColorBar" then
-            moduleDB.useClassColor = moduleDB.useClassColorBar
-        end
         CreateContainer()
         UpdatePartyData()
     end
@@ -339,33 +296,33 @@ end
 
 -- Create a cooldown bar
 local function CreateBar(index)
-    local bar = CreateFrame("StatusBar", nil, container)
+    local bar = CreateFrame("Frame", nil, container)
     bar:SetSize(db.barWidth, db.barHeight)
-    bar:SetMinMaxValues(0, 1)
-    bar:SetValue(1)
-    bar:SetStatusBarTexture("Interface\\TargetingFrame\\UI-StatusBar")
-    bar:SetStatusBarColor(0.2, 0.8, 0.2)
 
-    -- Background
     bar.bg = bar:CreateTexture(nil, "BACKGROUND")
-    bar.bg:SetAllPoints()
-    bar.bg:SetColorTexture(0.1, 0.1, 0.1, 0.6)
+    bar.bg:SetTexture("Interface\\Buttons\\WHITE8X8")
 
-    -- Icon
     bar.icon = bar:CreateTexture(nil, "ARTWORK")
-    bar.icon:SetSize(db.barHeight, db.barHeight)
-    bar.icon:SetPoint("LEFT", bar, "LEFT", 0, 0)
     bar.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
 
-    -- Name text
-    bar.nameText = bar:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    bar.nameText:SetPoint("LEFT", bar, "LEFT", db.barHeight + 5, 0)
-    bar.nameText:SetFont("Fonts\\FRIZQT__.TTF", db.nameFontSize or db.fontSize, "OUTLINE")
+    bar.borderTop = bar:CreateTexture(nil, "BORDER")
+    bar.borderBottom = bar:CreateTexture(nil, "BORDER")
+    bar.borderRight = bar:CreateTexture(nil, "BORDER")
 
-    -- Timer text
-    bar.timerText = bar:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    bar.timerText:SetPoint("RIGHT", bar, "RIGHT", -5, 0)
-    bar.timerText:SetFont("Fonts\\FRIZQT__.TTF", db.timerFontSize or db.fontSize, "OUTLINE")
+    bar.cooldown = CreateFrame("StatusBar", nil, bar)
+    bar.cooldown:SetMinMaxValues(0, 1)
+    bar.cooldown:SetValue(0)
+    bar.cooldown:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
+    bar.cooldown.bg = bar.cooldown:CreateTexture(nil, "BACKGROUND")
+    bar.cooldown.bg:SetAllPoints()
+    bar.cooldown.bg:SetTexture("Interface\\Buttons\\WHITE8X8")
+
+    bar.nameText = bar:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    bar.nameText:SetJustifyH("LEFT")
+
+    bar.cooldownText = bar.cooldown:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    bar.cooldownText:SetJustifyH("RIGHT")
+    bar.timerText = bar.cooldownText
 
     bar:Hide()
     return bar
@@ -374,22 +331,52 @@ end
 local function ConfigureBar(bar)
     if not bar or not db then return end
 
+    local borderSize = 1
+    local iconSize = math.min(db.iconSize, db.barHeight)
+    local statusLeft = iconSize + 2
+
     bar:SetSize(db.barWidth, db.barHeight)
-    bar.icon:SetSize(db.barHeight, db.barHeight)
+    bar.icon:SetSize(iconSize, iconSize)
     bar.icon:ClearAllPoints()
     bar.icon:SetPoint("LEFT", bar, "LEFT", 0, 0)
 
-    bar.nameText:ClearAllPoints()
-    if db.showIcon then
-        bar.nameText:SetPoint("LEFT", bar, "LEFT", db.barHeight + 5, 0)
-    else
-        bar.nameText:SetPoint("LEFT", bar, "LEFT", 5, 0)
-    end
-    bar.nameText:SetFont("Fonts\\FRIZQT__.TTF", db.nameFontSize or db.fontSize, "OUTLINE")
+    bar.bg:ClearAllPoints()
+    bar.bg:SetPoint("TOPLEFT", bar, "TOPLEFT", statusLeft, 0)
+    bar.bg:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", 0, 0)
 
-    bar.timerText:ClearAllPoints()
-    bar.timerText:SetPoint("RIGHT", bar, "RIGHT", -5, 0)
-    bar.timerText:SetFont("Fonts\\FRIZQT__.TTF", db.timerFontSize or db.fontSize, "OUTLINE")
+    bar.borderTop:ClearAllPoints()
+    bar.borderTop:SetPoint("TOPLEFT", bar, "TOPLEFT", statusLeft, 0)
+    bar.borderTop:SetPoint("TOPRIGHT", bar, "TOPRIGHT", 0, 0)
+    bar.borderTop:SetHeight(borderSize)
+    bar.borderTop:SetColorTexture(0, 0, 0, 1)
+
+    bar.borderBottom:ClearAllPoints()
+    bar.borderBottom:SetPoint("BOTTOMLEFT", bar, "BOTTOMLEFT", statusLeft, 0)
+    bar.borderBottom:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", 0, 0)
+    bar.borderBottom:SetHeight(borderSize)
+    bar.borderBottom:SetColorTexture(0, 0, 0, 1)
+
+    bar.borderRight:ClearAllPoints()
+    bar.borderRight:SetPoint("TOPRIGHT", bar, "TOPRIGHT", 0, -borderSize)
+    bar.borderRight:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", 0, borderSize)
+    bar.borderRight:SetWidth(borderSize)
+    bar.borderRight:SetColorTexture(0, 0, 0, 1)
+
+    bar.cooldown:ClearAllPoints()
+    bar.cooldown:SetPoint("TOPLEFT", bar, "TOPLEFT", statusLeft, -borderSize)
+    bar.cooldown:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT", -borderSize, borderSize)
+    bar.cooldown.bg:SetColorTexture(0.09, 0.09, 0.11, 0.82)
+
+    bar.nameText:ClearAllPoints()
+    bar.nameText:SetPoint("LEFT", bar, "LEFT", statusLeft + 4, 0)
+    bar.nameText:SetPoint("RIGHT", bar, "RIGHT", -4, 0)
+    bar.nameText:SetFont("Fonts\\FRIZQT__.TTF", db.fontSize, "")
+    bar.nameText:SetShadowOffset(0, 0)
+
+    bar.cooldownText:ClearAllPoints()
+    bar.cooldownText:SetPoint("RIGHT", bar.cooldown, "RIGHT", -4, 0)
+    bar.cooldownText:SetFont("Fonts\\FRIZQT__.TTF", db.fontSize, "")
+    bar.cooldownText:SetShadowOffset(0, 0)
 end
 
 local function RefreshContainerGeometry()
@@ -422,40 +409,60 @@ end
 local function UpdateBarVisuals(bar, data)
     if not bar or not data then return end
 
+    local now = GetTime()
+    local isReady = data.startTime == 0 or (now - data.startTime) >= (data.cd or 0)
+    local remaining = math.max(0, (data.cd or 0) - (now - data.startTime))
+    local progress = 0
+    local classColor
+    local textOffset = GetIconOffset() + 4
+
+    if UsesClassColor(db) and data.class then
+        classColor = Model.GetClassColor(data.class)
+    else
+        classColor = { 0.45, 0.45, 0.45 }
+    end
+
+    if not isReady and (data.cd or 0) > 0 then
+        progress = math.max(0, math.min(1, 1 - (remaining / data.cd)))
+    end
+
     ConfigureBar(bar)
-    bar:SetValue(data.previewValue or 1)
 
-    -- Update icon
-    if db.showIcon then
-        bar.icon:SetTexture(C_Spell.GetSpellTexture(data.spellID))
-        bar.icon:Show()
+    bar.icon:SetTexture(C_Spell.GetSpellTexture(data.spellID))
+    bar.icon:Show()
+    bar.nameText:SetText(data.name or "")
+    bar.nameText:Show()
+
+    if isReady then
+        bar.bg:Show()
+        bar.cooldown:Hide()
+        bar.bg:SetVertexColor(classColor[1], classColor[2], classColor[3], 0.9)
+        bar.nameText:SetTextColor(0.06, 0.06, 0.06)
+        bar.nameText:ClearAllPoints()
+        bar.nameText:SetPoint("LEFT", bar, "LEFT", textOffset, 0)
+        bar.nameText:SetPoint("RIGHT", bar, "RIGHT", -4, 0)
+        bar.cooldownText:SetText("")
+        bar.cooldownText:Hide()
     else
-        bar.icon:Hide()
-    end
+        bar.bg:Hide()
+        bar.cooldown:Show()
+        bar.cooldown:SetStatusBarColor(classColor[1], classColor[2], classColor[3], 1)
+        bar.cooldown:SetValue(data.previewValue or progress)
+        bar.nameText:SetTextColor(0.94, 0.94, 0.94)
+        bar.nameText:ClearAllPoints()
+        bar.nameText:SetPoint("LEFT", bar, "LEFT", textOffset, 0)
+        bar.nameText:SetPoint("RIGHT", bar.cooldownText, "LEFT", -4, 0)
 
-    -- Update name
-    if db.showName then
-        bar.nameText:SetText(data.name or "")
-        if UsesClassColor(db) and data.class then
-            local color = Model.GetClassColor(data.class)
-            bar.nameText:SetTextColor(unpack(color))
-        else
-            bar.nameText:SetTextColor(1, 1, 1)
+        local timerText = data.previewText
+        if not timerText then
+            timerText = Model.FormatTimerText(remaining)
         end
-        bar.nameText:Show()
-    else
-        bar.nameText:Hide()
-    end
-
-    if db.showTimer then
-        if data.previewText then
-            bar.timerText:SetText(data.previewText)
-        else
-            bar.timerText:SetText(db.showReadyText and (db.readyText or "Ready") or "")
+        if type(timerText) == "table" then
+            timerText = timerText[1]
         end
-        bar.timerText:Show()
-    else
-        bar.timerText:Hide()
+        bar.cooldownText:SetText(timerText or "")
+        bar.cooldownText:SetTextColor(0.94, 0.94, 0.94)
+        bar.cooldownText:Show()
     end
 end
 
@@ -694,7 +701,7 @@ local function TriggerCooldown(unit)
     -- Start cooldown
     data.startTime = GetTime()
     cooldownState[guid] = data.startTime
-    bar:SetValue(0)
+    bar.cooldown:SetValue(0)
 
     ReLayout()
 
@@ -703,14 +710,12 @@ local function TriggerCooldown(unit)
         local remaining = cdDuration - elapsed
 
         if remaining > 0 then
-            self:SetValue(elapsed / cdDuration)
+            self.cooldown:SetValue(elapsed / cdDuration)
 
-            if db.showTimer then
-                local text, displayVal = Model.FormatTimerText(remaining)
-                if displayVal ~= self._lastDisplayed then
-                    self._lastDisplayed = displayVal
-                    self.timerText:SetText(text)
-                end
+            local text, displayVal = Model.FormatTimerText(remaining)
+            if displayVal ~= self._lastDisplayed then
+                self._lastDisplayed = displayVal
+                self.cooldownText:SetText(text)
             end
 
             -- Resort every second while cooling
@@ -721,15 +726,9 @@ local function TriggerCooldown(unit)
             end
         else
             -- Cooldown finished
-            self:SetValue(1)
+            self.cooldown:SetValue(1)
             cooldownState[guid] = nil
-            if db.showTimer then
-                if db.showReadyText then
-                    self.timerText:SetText(db.readyText or "Ready")
-                else
-                    self.timerText:SetText("")
-                end
-            end
+            self.cooldownText:SetText("")
             self._lastDisplayed = nil
             self:SetScript("OnUpdate", nil)
             ReLayout()
