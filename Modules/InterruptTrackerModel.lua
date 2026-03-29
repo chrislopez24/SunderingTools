@@ -159,4 +159,6 @@ function Model.BuildPreviewBars()
   }
 end
 
+_G.SunderingToolsInterruptTrackerModel = Model
+
 return Model

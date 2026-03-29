@@ -14,5 +14,7 @@ Settings.lua
 MinimapButton.lua
 
 # Modules
+Modules\InterruptTrackerModel.lua
 Modules\InterruptTracker.lua
+Modules\BloodlustSoundModel.lua
 Modules\BloodlustSound.lua

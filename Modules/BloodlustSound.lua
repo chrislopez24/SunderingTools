@@ -4,7 +4,10 @@
 local addon = _G.SunderingTools
 if not addon then return end
 
-local Model = dofile("Modules/BloodlustSoundModel.lua")
+local Model = assert(
+  _G.SunderingToolsBloodlustSoundModel,
+  "SunderingToolsBloodlustSoundModel must load before BloodlustSound.lua"
+)
 
 local module = {
   key = "BloodlustSound",

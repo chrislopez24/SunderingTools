@@ -4,7 +4,10 @@
 local addon = _G.SunderingTools
 if not addon then return end
 
-local Model = dofile("Modules/InterruptTrackerModel.lua")
+local Model = assert(
+    _G.SunderingToolsInterruptTrackerModel,
+    "SunderingToolsInterruptTrackerModel must load before InterruptTracker.lua"
+)
 local defaultPosX, defaultPosY = Model.GetDefaultPosition()
 
 local module = {

@@ -37,4 +37,6 @@ function Model.ChannelOptions()
   return CHANNEL_OPTIONS
 end
 
+_G.SunderingToolsBloodlustSoundModel = Model
+
 return Model

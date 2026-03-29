@@ -2,9 +2,9 @@
 -- Lightweight interrupt tracker and bloodlust sound
 
 local addonName, addon = ...
-local Config = _G.SunderingToolsConfig or dofile("Core/Config.lua")
-local Registry = _G.SunderingToolsRegistry or dofile("Core/Registry.lua")
-local SettingsModel = _G.SunderingToolsSettingsModel or dofile("Core/SettingsModel.lua")
+local Config = assert(_G.SunderingToolsConfig, "SunderingToolsConfig must load before SunderingTools.lua")
+local Registry = assert(_G.SunderingToolsRegistry, "SunderingToolsRegistry must load before SunderingTools.lua")
+local SettingsModel = assert(_G.SunderingToolsSettingsModel, "SunderingToolsSettingsModel must load before SunderingTools.lua")
 
 _G.SunderingTools = addon
 

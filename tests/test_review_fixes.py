@@ -56,3 +56,16 @@ def test_interrupt_tracker_panel_exposes_technical_controls():
     assert 'addonRef:SetModuleValue("InterruptTracker", "useClassColorBar", value)' in source
     assert "local function UsesClassColor(moduleDB)" in source
     assert "if UsesClassColor(db) and data.class then" in source
+
+
+def test_runtime_files_do_not_use_dofile_and_models_load_from_toc():
+    toc = read("SunderingTools.toc")
+    assert "Modules\\InterruptTrackerModel.lua" in toc
+    assert "Modules\\BloodlustSoundModel.lua" in toc
+
+    for path in (
+        "SunderingTools.lua",
+        "Modules/InterruptTracker.lua",
+        "Modules/BloodlustSound.lua",
+    ):
+        assert "dofile(" not in read(path)

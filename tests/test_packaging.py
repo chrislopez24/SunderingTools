@@ -24,7 +24,9 @@ def test_toc_no_missing_embeds_and_new_entrypoints():
     assert "Libs\\LibStub\\LibStub.lua" not in toc
     assert "Libs\\CallbackHandler-1.0\\CallbackHandler-1.0.lua" not in toc
     assert "@project-version@" in toc
+    assert "Modules\\InterruptTrackerModel.lua" in toc
     assert "Modules\\InterruptTracker.lua" in toc
+    assert "Modules\\BloodlustSoundModel.lua" in toc
     assert "Modules\\BloodlustSound.lua" in toc
 
 
@@ -39,7 +41,9 @@ def test_required_runtime_files_are_tracked_in_git():
         "SunderingTools.lua",
         "Settings.lua",
         "SunderingTools.toc",
+        "Modules/InterruptTrackerModel.lua",
         "Modules/InterruptTracker.lua",
+        "Modules/BloodlustSoundModel.lua",
         "Modules/BloodlustSound.lua",
         "sounds/pedrolust.mp3",
     }
