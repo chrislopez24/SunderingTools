@@ -51,11 +51,12 @@ function Helpers:CreateText(parent, text, template, width)
   return CreateTextBlock(parent, text, template, width)
 end
 
-function Helpers:CreateSlider(parent, label, minValue, maxValue, step, value, onChange)
+function Helpers:CreateSlider(parent, label, minValue, maxValue, step, value, onChange, width)
+  local sliderWidth = width or 320
   local holder = CreateFrame("Frame", nil, parent)
-  holder:SetSize(320, 56)
+  holder:SetSize(sliderWidth, 56)
 
-  holder.label = CreateTextBlock(holder, label, "GameFontHighlight", 220)
+  holder.label = CreateTextBlock(holder, label, "GameFontHighlight", math.max(120, sliderWidth - 80))
   holder.label:SetPoint("TOPLEFT", 0, 0)
 
   holder.valueText = CreateTextBlock(holder, tostring(value), "GameFontHighlight", 80)
@@ -195,17 +196,17 @@ end
 
 local function CreateSettingsFrame()
   local frame = CreateFrame("Frame", "SunderingToolsSettings", UIParent, "BasicFrameTemplateWithInset")
-  frame:SetSize(560, 420)
+  frame:SetSize(640, 560)
   frame:SetPoint("CENTER")
   frame:Hide()
 
   frame.list = CreateFrame("Frame", nil, frame)
   frame.list:SetPoint("TOPLEFT", 12, -32)
-  frame.list:SetSize(160, 360)
+  frame.list:SetSize(160, 500)
 
   frame.panel = CreateFrame("Frame", nil, frame)
   frame.panel:SetPoint("TOPLEFT", frame.list, "TOPRIGHT", 12, 0)
-  frame.panel:SetSize(360, 360)
+  frame.panel:SetSize(420, 500)
 
   return frame
 end
@@ -233,7 +234,17 @@ function addon:RenderSection(sectionKey, panel, helpers)
       button:Disable()
     end
 
-    local helpText = CreateTextBlock(content, message, "GameFontHighlight", 320)
+    local resetAllButton = helpers:CreateButton(content, "Reset All Settings", function()
+      addon:ResetAllSettings()
+    end)
+    resetAllButton:SetPoint("TOPLEFT", button, "TOPRIGHT", 12, 0)
+
+    local helpText = CreateTextBlock(
+      content,
+      message .. "\n\n/su opens settings.\n/su config opens settings directly.\n/su reset reloads with defaults.",
+      "GameFontHighlight",
+      380
+    )
     helpText:SetPoint("TOPLEFT", button, "BOTTOMLEFT", 0, -12)
     return
   end

@@ -43,22 +43,21 @@ addon:SetMinimapVisible(false)
 assert(addon.db.global.minimap.hide == true, "hiding the minimap button should update saved state")
 assert(hidden == 1, "native minimap button should hide when disabled")
 
-local iconShown = 0
-addon.minimapIcon = {
-  Show = function(_, name)
-    assert(name == "SunderingTools", "libdbicon should show the addon entry")
-    iconShown = iconShown + 1
-  end,
-  Hide = function() end,
-}
-
 addon:SetMinimapVisible(true)
 assert(addon.db.global.minimap.hide == false, "showing the minimap button should update saved state")
 assert(shown == 1, "native minimap button should show when enabled")
-assert(iconShown == 1, "libdbicon should show when enabled")
 
 assert(addon:CanOpenEditMode() == false, "edit mode should be unavailable without module support")
 addon.InterruptTracker = {
   SetEditMode = function() end,
 }
 assert(addon:CanOpenEditMode() == true, "edit mode should be available when the module exposes support")
+
+local opened = 0
+addon.OpenSettings = function()
+  opened = opened + 1
+end
+
+SlashCmdList["SUNDERINGTOOLS"]("")
+SlashCmdList["SUNDERINGTOOLS"]("config")
+assert(opened == 2, "default and explicit slash commands should open settings")

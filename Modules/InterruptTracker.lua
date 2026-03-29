@@ -52,7 +52,10 @@ local usedBarsList = {} -- Ordered list for layout
 local container = nil
 local interruptStats = {} -- [guid] = count
 local CreateContainer
+local EnsureBarPool
+local ReLayout
 local UpdatePartyData
+local UpdateBarVisuals
 
 -- Get unit's spec ID (placeholder - would need LibGroupInSpecT for real implementation)
 local function GetUnitSpecID(unit)
@@ -116,6 +119,8 @@ function module:ResetPosition(moduleDB)
 end
 
 function module:buildSettings(panel, helpers, addonRef, moduleDB)
+    db = moduleDB
+
     local preview = helpers:CreatePreview(panel, Model.BuildPreviewBars(), moduleDB)
     preview:SetPoint("TOPLEFT", 0, 0)
 
@@ -132,7 +137,74 @@ function module:buildSettings(panel, helpers, addonRef, moduleDB)
     local resetButton = helpers:CreateButton(panel, "Reset Position", function()
         module:ResetPosition(moduleDB)
     end)
-    resetButton:SetPoint("TOPLEFT", editButton, "BOTTOMLEFT", 0, -8)
+    resetButton:SetPoint("TOPLEFT", editButton, "TOPRIGHT", 12, 0)
+
+    local maxBarsSlider = helpers:CreateSlider(panel, "Maximum Bars", 1, 8, 1, moduleDB.maxBars, function(value)
+        addonRef:SetModuleValue("InterruptTracker", "maxBars", value)
+    end, 180)
+    maxBarsSlider:SetPoint("TOPLEFT", editButton, "BOTTOMLEFT", 0, -20)
+
+    local growDirectionDropdown = helpers:CreateDropdown(
+        panel,
+        "Grow Direction",
+        { "DOWN", "UP" },
+        moduleDB.growDirection,
+        140,
+        function(value)
+            addonRef:SetModuleValue("InterruptTracker", "growDirection", value)
+        end
+    )
+    growDirectionDropdown:SetPoint("TOPLEFT", maxBarsSlider, "BOTTOMLEFT", -4, -10)
+
+    local spacingSlider = helpers:CreateSlider(panel, "Bar Spacing", 0, 12, 1, moduleDB.spacing, function(value)
+        addonRef:SetModuleValue("InterruptTracker", "spacing", value)
+    end, 180)
+    spacingSlider:SetPoint("TOPLEFT", growDirectionDropdown, "BOTTOMLEFT", 4, -10)
+
+    local barWidthSlider = helpers:CreateSlider(panel, "Bar Width", 100, 320, 5, moduleDB.barWidth, function(value)
+        addonRef:SetModuleValue("InterruptTracker", "barWidth", value)
+    end, 180)
+    barWidthSlider:SetPoint("TOPLEFT", spacingSlider, "BOTTOMLEFT", 0, -10)
+
+    local barHeightSlider = helpers:CreateSlider(panel, "Bar Height", 16, 40, 1, moduleDB.barHeight, function(value)
+        addonRef:SetModuleValue("InterruptTracker", "barHeight", value)
+    end, 180)
+    barHeightSlider:SetPoint("TOPLEFT", barWidthSlider, "BOTTOMLEFT", 0, -10)
+
+    local readyTextInput = helpers:CreateEditBox(panel, "Ready Text", 180, moduleDB.readyText or "", function(value)
+        addonRef:SetModuleValue("InterruptTracker", "readyText", value)
+    end)
+    readyTextInput:SetPoint("TOPLEFT", barHeightSlider, "BOTTOMLEFT", -4, -8)
+
+    local showIconBox = helpers:CreateCheckbox(panel, "Show Icon", moduleDB.showIcon, function(value)
+        addonRef:SetModuleValue("InterruptTracker", "showIcon", value)
+    end)
+    showIconBox:SetPoint("TOPLEFT", maxBarsSlider, "TOPRIGHT", 24, -2)
+
+    local showNameBox = helpers:CreateCheckbox(panel, "Show Name", moduleDB.showName, function(value)
+        addonRef:SetModuleValue("InterruptTracker", "showName", value)
+    end)
+    showNameBox:SetPoint("TOPLEFT", showIconBox, "BOTTOMLEFT", 0, -8)
+
+    local showTimerBox = helpers:CreateCheckbox(panel, "Show Timer", moduleDB.showTimer, function(value)
+        addonRef:SetModuleValue("InterruptTracker", "showTimer", value)
+    end)
+    showTimerBox:SetPoint("TOPLEFT", showNameBox, "BOTTOMLEFT", 0, -8)
+
+    local showReadyTextBox = helpers:CreateCheckbox(panel, "Show Ready Text", moduleDB.showReadyText, function(value)
+        addonRef:SetModuleValue("InterruptTracker", "showReadyText", value)
+    end)
+    showReadyTextBox:SetPoint("TOPLEFT", showTimerBox, "BOTTOMLEFT", 0, -8)
+
+    local nameFontSlider = helpers:CreateSlider(panel, "Name Font Size", 8, 24, 1, moduleDB.nameFontSize, function(value)
+        addonRef:SetModuleValue("InterruptTracker", "nameFontSize", value)
+    end, 180)
+    nameFontSlider:SetPoint("TOPLEFT", showReadyTextBox, "BOTTOMLEFT", 4, -14)
+
+    local timerFontSlider = helpers:CreateSlider(panel, "Timer Font Size", 8, 24, 1, moduleDB.timerFontSize, function(value)
+        addonRef:SetModuleValue("InterruptTracker", "timerFontSize", value)
+    end, 180)
+    timerFontSlider:SetPoint("TOPLEFT", nameFontSlider, "BOTTOMLEFT", 0, -10)
 end
 
 function module:onConfigChanged(addonRef, moduleDB, key)
@@ -147,6 +219,46 @@ function module:onConfigChanged(addonRef, moduleDB, key)
         elseif container then
             container:Hide()
         end
+        return
+    end
+
+    if key == "posX" or key == "posY" then
+        local anchor = self.anchor or container
+        if anchor then
+            anchor:ClearAllPoints()
+            anchor:SetPoint("CENTER", UIParent, "CENTER", moduleDB.posX, moduleDB.posY)
+        end
+        return
+    end
+
+    if not moduleDB.enabled then
+        return
+    end
+
+    if key == "maxBars" then
+        CreateContainer()
+        UpdatePartyData()
+        return
+    end
+
+    if key == "growDirection"
+        or key == "spacing"
+        or key == "barWidth"
+        or key == "barHeight"
+        or key == "showIcon"
+        or key == "showName"
+        or key == "showTimer"
+        or key == "nameFontSize"
+        or key == "timerFontSize"
+        or key == "showReadyText"
+        or key == "readyText" then
+        CreateContainer()
+        for _, data in pairs(activeBars) do
+            if data.bar then
+                UpdateBarVisuals(data.bar, data)
+            end
+        end
+        ReLayout()
     end
 end
 
@@ -184,9 +296,58 @@ local function CreateBar(index)
     return bar
 end
 
+local function ConfigureBar(bar)
+    if not bar or not db then return end
+
+    bar:SetSize(db.barWidth, db.barHeight)
+    bar.icon:SetSize(db.barHeight, db.barHeight)
+    bar.icon:ClearAllPoints()
+    bar.icon:SetPoint("LEFT", bar, "LEFT", 0, 0)
+
+    bar.nameText:ClearAllPoints()
+    if db.showIcon then
+        bar.nameText:SetPoint("LEFT", bar, "LEFT", db.barHeight + 5, 0)
+    else
+        bar.nameText:SetPoint("LEFT", bar, "LEFT", 5, 0)
+    end
+    bar.nameText:SetFont("Fonts\\FRIZQT__.TTF", db.nameFontSize or db.fontSize, "OUTLINE")
+
+    bar.timerText:ClearAllPoints()
+    bar.timerText:SetPoint("RIGHT", bar, "RIGHT", -5, 0)
+    bar.timerText:SetFont("Fonts\\FRIZQT__.TTF", db.timerFontSize or db.fontSize, "OUTLINE")
+end
+
+local function RefreshContainerGeometry()
+    if not container or not db then return end
+
+    local totalHeight = (db.maxBars * db.barHeight) + (math.max(0, db.maxBars - 1) * db.spacing)
+    container:SetSize(db.barWidth, math.max(db.barHeight, totalHeight))
+end
+
+local function EnsureBarPool()
+    if not container or not db then return end
+
+    for index = 1, db.maxBars do
+        if not bars[index] then
+            bars[index] = CreateBar(index)
+        end
+        ConfigureBar(bars[index])
+    end
+
+    for index = db.maxBars + 1, #bars do
+        if bars[index] then
+            bars[index]:Hide()
+        end
+    end
+
+    RefreshContainerGeometry()
+end
+
 -- Update bar visuals
 local function UpdateBarVisuals(bar, data)
     if not bar or not data then return end
+
+    ConfigureBar(bar)
 
     -- Update icon
     if db.showIcon then
@@ -237,6 +398,7 @@ end
 local function ReLayout()
     if not container then return end
 
+    EnsureBarPool()
     SortBars()
 
     local spacing = db.spacing
@@ -262,7 +424,11 @@ end
 
 -- Create main container
 function CreateContainer()
-    if container then return end
+    if container then
+        EnsureBarPool()
+        RefreshContainerGeometry()
+        return
+    end
 
     container = CreateFrame("Frame", "SunderingToolsInterruptTracker", UIParent)
     container:SetSize(db.barWidth, db.barHeight * db.maxBars)
@@ -288,10 +454,7 @@ function CreateContainer()
     container.editLabel:SetText("Interrupt Tracker")
     container.editLabel:Hide()
 
-    -- Create bars pool
-    for i = 1, db.maxBars do
-        bars[i] = CreateBar(i)
-    end
+    EnsureBarPool()
 
     module.anchor = container
     UpdateAnchorVisuals(addon.db and addon.db.global and addon.db.global.editMode)

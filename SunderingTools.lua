@@ -88,14 +88,6 @@ end
 function addon:SetMinimapVisible(visible)
     self.db.global.minimap.hide = not visible
 
-    if self.minimapIcon then
-        if visible then
-            self.minimapIcon:Show("SunderingTools")
-        else
-            self.minimapIcon:Hide("SunderingTools")
-        end
-    end
-
     if self.minimapButton then
         if visible then
             self.minimapButton:Show()
@@ -118,84 +110,15 @@ function addon:SetEditMode(enabled)
     end
 end
 
--- Initialize minimap icon
-function addon:InitMinimapIcon()
-    local LDB = LibStub and LibStub("LibDataBroker-1.1", true)
-    local LDBIcon = LDB and LibStub("LibDBIcon-1.0", true)
-
-    if not LDB or not LDBIcon then
-        self:CreateMinimapButton()
-        return
-    end
-
-    -- Create LDB data object
-    local dataObject = LDB:NewDataObject("SunderingTools", {
-        type = "launcher",
-        text = "SunderingTools",
-        icon = "Interface\\Icons\\Ability_Warrior_PunishingBlow",
-        OnTooltipShow = function(tooltip)
-            tooltip:AddLine("|cff00ff00SunderingTools|r")
-            tooltip:AddLine("Click to open settings")
-            tooltip:AddLine(" ")
-            tooltip:AddLine("Interrupt Tracker: Track party interrupts")
-            tooltip:AddLine("Bloodlust Sound: Alert on bloodlust/heroism")
-        end,
-        OnClick = function(_, button)
-            if button == "LeftButton" then
-                addon:OpenSettings()
-            elseif button == "RightButton" then
-                -- Quick toggle menu
-                addon:ShowQuickMenu()
-            end
-        end,
-    })
-
-    -- Register with LibDBIcon
-    LDBIcon:Register("SunderingTools", dataObject, self.db.global.minimap)
-    self.minimapIcon = LDBIcon
-    self:SetMinimapVisible(self:IsMinimapVisible())
+function addon:ResetAllSettings()
+    SunderingToolsDB = nil
+    ReloadUI()
 end
 
--- Show quick toggle menu
-function addon:ShowQuickMenu()
-    local menu = {
-        { text = "|cff00ff00SunderingTools|r", isTitle = true, notCheckable = true },
-        { text = "Settings", func = function() addon:OpenSettings() end, notCheckable = true },
-        { text = " ", notCheckable = true, disabled = true },
-        {
-            text = "Interrupt Tracker",
-            checked = function() return addon.db.InterruptTracker.enabled end,
-            func = function()
-                addon.db.InterruptTracker.enabled = not addon.db.InterruptTracker.enabled
-                -- Reload module
-                ReloadUI()
-            end,
-            keepShownOnClick = true,
-        },
-        {
-            text = "Bloodlust Sound",
-            checked = function() return addon.db.BloodlustSound.enabled end,
-            func = function()
-                addon:SetModuleValue("BloodlustSound", "enabled", not addon.db.BloodlustSound.enabled)
-            end,
-            keepShownOnClick = true,
-        },
-        { text = " ", notCheckable = true, disabled = true },
-        { text = "Test Bloodlust", func = function()
-            if addon.BloodlustSound and addon.BloodlustSound.Test then
-                addon.BloodlustSound:Test(addon.db.BloodlustSound)
-            end
-        end, notCheckable = true },
-        { text = "Interrupt Stats", func = function()
-            if addon.InterruptTracker and addon.InterruptTracker.PrintStats then
-                addon.InterruptTracker.PrintStats()
-            end
-        end, notCheckable = true },
-        { text = " ", notCheckable = true, disabled = true },
-        { text = "Close", notCheckable = true },
-    }
-
-    EasyMenu(menu, CreateFrame("Frame", "SunderingToolsQuickMenu", UIParent, "UIDropDownMenuTemplate"), "cursor", 0, 0, "MENU")
+-- Initialize native minimap button
+function addon:InitMinimapIcon()
+    self:CreateMinimapButton()
+    self:SetMinimapVisible(self:IsMinimapVisible())
 end
 
 -- Register slash commands
@@ -203,12 +126,11 @@ SLASH_SUNDERINGTOOLS1 = "/su"
 SLASH_SUNDERINGTOOLS2 = "/sundering"
 SlashCmdList["SUNDERINGTOOLS"] = function(msg)
     if msg == "reset" then
-        SunderingToolsDB = nil
-        ReloadUI()
+        addon:ResetAllSettings()
     elseif msg == "config" or msg == "settings" then
         addon:OpenSettings()
     else
-        addon:ShowQuickMenu()
+        addon:OpenSettings()
     end
 end
 
@@ -218,5 +140,5 @@ frame:RegisterEvent("PLAYER_LOGIN")
 frame:SetScript("OnEvent", function()
     addon:InitDB()
     addon:InitMinimapIcon()
-    print("|cff00ff00SunderingTools|r loaded. Type /su for options.")
+    print("|cff00ff00SunderingTools|r loaded. Type /su for settings.")
 end)

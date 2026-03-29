@@ -1,0 +1,51 @@
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def read(path: str) -> str:
+    return (ROOT / path).read_text(encoding="utf-8")
+
+
+def test_default_slash_command_opens_settings():
+    source = read("SunderingTools.lua")
+    assert 'elseif msg == "config" or msg == "settings" then' in source
+    assert "else\n        addon:OpenSettings()" in source
+    assert "addon:ShowQuickMenu()" not in source
+
+
+def test_minimap_launcher_is_native_only():
+    source = read("SunderingTools.lua")
+    assert "LibStub" not in source
+    assert "LibDataBroker" not in source
+    assert "LibDBIcon" not in source
+    assert "RightButton" not in source
+    assert "ShowQuickMenu" not in source
+
+
+def test_general_panel_includes_help_and_reset_all():
+    source = read("Settings.lua")
+    assert "Reset All Settings" in source
+    assert "/su opens settings." in source
+    assert "/su config opens settings directly." in source
+    assert "/su reset reloads with defaults." in source
+
+
+def test_interrupt_tracker_panel_exposes_technical_controls():
+    source = read("Modules/InterruptTracker.lua")
+    for label in (
+        "Maximum Bars",
+        "Grow Direction",
+        "Bar Spacing",
+        "Bar Width",
+        "Bar Height",
+        "Show Icon",
+        "Show Name",
+        "Show Timer",
+        "Name Font Size",
+        "Timer Font Size",
+        "Show Ready Text",
+        "Ready Text",
+    ):
+        assert label in source
