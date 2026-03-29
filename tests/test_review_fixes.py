@@ -67,7 +67,11 @@ def test_interrupt_tracker_panel_exposes_technical_controls():
     assert "bar.borderBottom" in source
     assert "bar.borderRight" in source
     assert "bar.cooldown = CreateFrame(\"StatusBar\", nil, bar)" in source
+    assert "bar.cooldownNameText = bar.cooldown:CreateFontString(nil, \"OVERLAY\", \"GameFontNormal\")" in source
     assert "bar.cooldownText = bar.cooldown:CreateFontString(nil, \"OVERLAY\", \"GameFontNormal\")" in source
+    assert "bar.nameText:Hide()" in source
+    assert "bar.cooldownNameText:Show()" in source
+    assert "local visibleCount = math.max(1, math.min(db.maxBars, #usedBarsList))" in source
 
     for removed in (
         "Name Font Size",

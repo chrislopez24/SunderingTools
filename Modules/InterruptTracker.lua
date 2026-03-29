@@ -319,9 +319,15 @@ local function CreateBar(index)
 
     bar.nameText = bar:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     bar.nameText:SetJustifyH("LEFT")
+    bar.nameText:SetJustifyV("MIDDLE")
+
+    bar.cooldownNameText = bar.cooldown:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    bar.cooldownNameText:SetJustifyH("LEFT")
+    bar.cooldownNameText:SetJustifyV("MIDDLE")
 
     bar.cooldownText = bar.cooldown:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     bar.cooldownText:SetJustifyH("RIGHT")
+    bar.cooldownText:SetJustifyV("MIDDLE")
     bar.timerText = bar.cooldownText
 
     bar:Hide()
@@ -373,6 +379,12 @@ local function ConfigureBar(bar)
     bar.nameText:SetFont("Fonts\\FRIZQT__.TTF", db.fontSize, "")
     bar.nameText:SetShadowOffset(0, 0)
 
+    bar.cooldownNameText:ClearAllPoints()
+    bar.cooldownNameText:SetPoint("LEFT", bar.cooldown, "LEFT", 4, 0)
+    bar.cooldownNameText:SetPoint("RIGHT", bar.cooldownText, "LEFT", -4, 0)
+    bar.cooldownNameText:SetFont("Fonts\\FRIZQT__.TTF", db.fontSize, "")
+    bar.cooldownNameText:SetShadowOffset(0, 0)
+
     bar.cooldownText:ClearAllPoints()
     bar.cooldownText:SetPoint("RIGHT", bar.cooldown, "RIGHT", -4, 0)
     bar.cooldownText:SetFont("Fonts\\FRIZQT__.TTF", db.fontSize, "")
@@ -382,7 +394,8 @@ end
 local function RefreshContainerGeometry()
     if not container or not db then return end
 
-    local totalHeight = (db.maxBars * db.barHeight) + (math.max(0, db.maxBars - 1) * db.spacing)
+    local visibleCount = math.max(1, math.min(db.maxBars, #usedBarsList))
+    local totalHeight = (visibleCount * db.barHeight) + (math.max(0, visibleCount - 1) * db.spacing)
     container:SetSize(db.barWidth, math.max(db.barHeight, totalHeight))
 end
 
@@ -431,13 +444,15 @@ local function UpdateBarVisuals(bar, data)
     bar.icon:SetTexture(C_Spell.GetSpellTexture(data.spellID))
     bar.icon:Show()
     bar.nameText:SetText(data.name or "")
-    bar.nameText:Show()
+    bar.cooldownNameText:SetText(data.name or "")
 
     if isReady then
         bar.bg:Show()
         bar.cooldown:Hide()
         bar.bg:SetVertexColor(classColor[1], classColor[2], classColor[3], 0.9)
         bar.nameText:SetTextColor(0.06, 0.06, 0.06)
+        bar.nameText:Show()
+        bar.cooldownNameText:Hide()
         bar.nameText:ClearAllPoints()
         bar.nameText:SetPoint("LEFT", bar, "LEFT", textOffset, 0)
         bar.nameText:SetPoint("RIGHT", bar, "RIGHT", -4, 0)
@@ -448,10 +463,9 @@ local function UpdateBarVisuals(bar, data)
         bar.cooldown:Show()
         bar.cooldown:SetStatusBarColor(classColor[1], classColor[2], classColor[3], 1)
         bar.cooldown:SetValue(data.previewValue or progress)
-        bar.nameText:SetTextColor(0.94, 0.94, 0.94)
-        bar.nameText:ClearAllPoints()
-        bar.nameText:SetPoint("LEFT", bar, "LEFT", textOffset, 0)
-        bar.nameText:SetPoint("RIGHT", bar.cooldownText, "LEFT", -4, 0)
+        bar.nameText:Hide()
+        bar.cooldownNameText:SetTextColor(0.94, 0.94, 0.94)
+        bar.cooldownNameText:Show()
 
         local timerText = data.previewText
         if not timerText then
