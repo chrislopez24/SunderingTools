@@ -1,0 +1,14 @@
+## Interface: 120000, 120001
+## Version: @project-version@
+## Title: SunderingTools
+## Notes: Lightweight interrupt tracker and bloodlust sound
+## Author: ExWind
+## SavedVariables: SunderingToolsDB
+
+# Core
+SunderingTools.lua
+Settings.lua
+
+# Modules
+Modules\InterruptTracker.lua
+Modules\BloodlustSound.lua

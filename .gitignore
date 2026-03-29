@@ -1,0 +1,6 @@
+# Local tooling
+.pytest_cache/
+__pycache__/
+
+# Scratch and local brainstorming artifacts
+.superpowers/
