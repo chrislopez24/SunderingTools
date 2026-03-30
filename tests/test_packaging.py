@@ -38,6 +38,10 @@ def test_toc_no_missing_embeds_and_new_entrypoints():
     assert "## Version: 0.0.2" in toc
     assert "Modules\\InterruptTrackerModel.lua" in toc
     assert "Modules\\InterruptTracker.lua" in toc
+    assert "Modules\\PartyDefensiveTrackerModel.lua" in toc
+    assert "Modules\\PartyDefensiveTracker.lua" in toc
+    assert "Modules\\DefensiveRaidTrackerModel.lua" in toc
+    assert "Modules\\DefensiveRaidTracker.lua" in toc
     assert "Modules\\BloodlustSoundModel.lua" in toc
     assert "Modules\\BloodlustSound.lua" in toc
 
@@ -58,6 +62,10 @@ def test_required_runtime_files_are_tracked_in_git():
         "SunderingTools.toc",
         "Modules/InterruptTrackerModel.lua",
         "Modules/InterruptTracker.lua",
+        "Modules/PartyDefensiveTrackerModel.lua",
+        "Modules/PartyDefensiveTracker.lua",
+        "Modules/DefensiveRaidTrackerModel.lua",
+        "Modules/DefensiveRaidTracker.lua",
         "Modules/BloodlustSoundModel.lua",
         "Modules/BloodlustSound.lua",
         "assets/icons/logo-minimap.tga",

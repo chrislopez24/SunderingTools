@@ -39,18 +39,6 @@ local module = {
 
 local db = addon.db and addon.db.BloodlustSound
 
-local ExhaustionIDs = {
-  57723,  -- Exhaustion
-  57724,  -- Sated
-  80354,  -- Temporal Displacement
-  95809,  -- Insanity
-  160455, -- Fatigued
-  207400, -- Temporal Displacement (different)
-  264689, -- Fatigued
-  390435, -- Exhaustion (Evoker)
-}
-local ExhaustionDuration = 600
-local ExhaustionFreshWindow = 5
 local BL_ICON_PEDRO = "Interface\\AddOns\\SunderingTools\\assets\\art\\pedro.tga"
 local DEFAULT_BL_SPELL_ID = 2825
 local PEDRO_ATLAS_COLS = 4
@@ -66,7 +54,24 @@ local BLOODLUST_AURA_IDS = {
   32182,  -- Heroism
   80353,  -- Time Warp
   264667, -- Primal Rage
+  178207, -- Drums of Fury
+  230935, -- Drums of the Mountain
+  272678,
+  160452,
+  256740,
+  292686,
+  386540,
   390386, -- Fury of the Aspects
+  381301,
+}
+local BLOODLUST_AURA_NAMES = {
+  ["bloodlust"] = true,
+  ["heroism"] = true,
+  ["time warp"] = true,
+  ["primal rage"] = true,
+  ["drums of fury"] = true,
+  ["drums of the mountain"] = true,
+  ["fury of the aspects"] = true,
 }
 
 local frame
@@ -74,16 +79,81 @@ local activeTimer
 local lastSeenExpirationTime
 local editModeEnabled = false
 
+local function NormalizeName(value)
+  if type(value) ~= "string" then
+    return nil
+  end
+
+  local normalized = string.lower(value)
+  normalized = normalized:gsub("^%s+", ""):gsub("%s+$", "")
+  if normalized == "" then
+    return nil
+  end
+
+  return normalized
+end
+
+local function IsTrackedTriggerAura(spellID, normalizedName)
+  if type(spellID) == "number" then
+    for _, trackedSpellID in ipairs(BLOODLUST_AURA_IDS) do
+      if trackedSpellID == spellID then
+        return true
+      end
+    end
+  end
+
+  return normalizedName ~= nil and BLOODLUST_AURA_NAMES[normalizedName] == true
+end
+
+local function FindActiveTriggerAura()
+  if C_UnitAuras and C_UnitAuras.GetAuraDataByIndex then
+    local index = 1
+    while true do
+      local aura = C_UnitAuras.GetAuraDataByIndex("player", index, "HELPFUL")
+      if not aura then
+        break
+      end
+
+      local normalizedName = NormalizeName(aura.name)
+      if IsTrackedTriggerAura(aura.spellId, normalizedName) then
+        return true, aura.expirationTime, aura
+      end
+
+      index = index + 1
+    end
+  end
+
+  if UnitAura then
+    for index = 1, 40 do
+      local name, icon, _, _, _, expirationTime, _, _, _, spellID = UnitAura("player", index, "HELPFUL")
+      if not name then
+        break
+      end
+
+      local normalizedName = NormalizeName(name)
+      if IsTrackedTriggerAura(spellID, normalizedName) then
+        return true, expirationTime, {
+          spellId = spellID,
+          name = name,
+          icon = icon,
+          iconFileID = icon,
+          expirationTime = expirationTime,
+        }
+      end
+    end
+  end
+
+  return false, nil, nil
+end
+
 local function IsPedroStyle()
   return (db and db.iconStyle or "BL_ICON") == "PEDRO"
 end
 
 local function GetCurrentBloodlustIcon()
-  for _, spellID in ipairs(BLOODLUST_AURA_IDS) do
-    local aura = C_UnitAuras.GetPlayerAuraBySpellID(spellID)
-    if aura then
-      return aura.icon or aura.iconFileID or (C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(spellID))
-    end
+  local hasAura, _, aura = FindActiveTriggerAura()
+  if hasAura and aura then
+    return aura.icon or aura.iconFileID or (C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(aura.spellId or DEFAULT_BL_SPELL_ID))
   end
 
   if C_Spell and C_Spell.GetSpellTexture then
@@ -183,37 +253,24 @@ local function UpdateAnchorVisuals(enabled)
   TrackerFrame.UpdateEditModeVisuals(frame, enabled, UpdateEditLabelVisibility)
 end
 
-local function CheckExhaustion()
-  for _, spellID in ipairs(ExhaustionIDs) do
-    local aura = C_UnitAuras.GetPlayerAuraBySpellID(spellID)
-    if aura then
-      return true, aura.expirationTime
-    end
-  end
-
-  return false, nil
+local function CheckActiveBloodlust()
+  local hasAura, expirationTime = FindActiveTriggerAura()
+  return hasAura, expirationTime
 end
 
-local function CheckFreshExhaustion()
-  for _, spellID in ipairs(ExhaustionIDs) do
-    local aura = C_UnitAuras.GetPlayerAuraBySpellID(spellID)
-    if aura then
-      local remaining = aura.expirationTime - GetTime()
-      if remaining >= (ExhaustionDuration - ExhaustionFreshWindow) then
-        if aura.expirationTime ~= lastSeenExpirationTime then
-          lastSeenExpirationTime = aura.expirationTime
-          return true, aura.expirationTime
-        end
-        return false, aura.expirationTime
-      end
-
-      lastSeenExpirationTime = aura.expirationTime
-      return false, aura.expirationTime
-    end
+local function CheckFreshBloodlust()
+  local hasBloodlust, expiration = CheckActiveBloodlust()
+  if not hasBloodlust then
+    lastSeenExpirationTime = nil
+    return false, nil
   end
 
-  lastSeenExpirationTime = nil
-  return false, nil
+  if expiration ~= lastSeenExpirationTime then
+    lastSeenExpirationTime = expiration
+    return true, expiration
+  end
+
+  return false, expiration
 end
 
 local function RefreshFrameLayout()
@@ -456,7 +513,12 @@ function module:buildSettings(panel, helpers, addonRef, moduleDB)
   end)
   stopButton:SetPoint("TOPLEFT", testButton, "TOPRIGHT", 12, 0)
 
-  local layoutLabel = helpers:CreateDividerLabel(panel, "Layout", channelDropdown, -22)
+  local durationSlider = helpers:CreateLabeledSlider(panel, "Duration", 5, 60, 1, moduleDB.duration or module.defaults.duration, function(value)
+    addonRef:SetModuleValue("BloodlustSound", "duration", value)
+  end, 220)
+  durationSlider:SetPoint("TOPLEFT", channelDropdown, "BOTTOMLEFT", 0, -10)
+
+  local layoutLabel = helpers:CreateDividerLabel(panel, "Layout", durationSlider, -22)
   local layoutBody = helpers:CreateSectionHint(panel, "Adjust icon size and placement.", 520)
   layoutBody:SetPoint("TOPLEFT", layoutLabel, "BOTTOMLEFT", 0, -8)
 
@@ -536,8 +598,8 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
     db = addon.db.BloodlustSound
     if db and db.enabled then
       EnsureFrame()
-      local hasExhaustion, expiration = CheckExhaustion()
-      if hasExhaustion then
+      local hasBloodlust, expiration = CheckActiveBloodlust()
+      if hasBloodlust then
         lastSeenExpirationTime = expiration
         addon:DebugLog("bloodlust", "resume active effect", expiration)
         PlayEffect(expiration)
@@ -551,10 +613,16 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
   if event == "UNIT_AURA" then
     local unitTarget = ...
     if unitTarget == "player" then
-      local hasFreshExhaustion, expiration = CheckFreshExhaustion()
-      if hasFreshExhaustion then
-        addon:DebugLog("bloodlust", "fresh exhaustion detected", expiration)
+      local hasFreshBloodlust, expiration = CheckFreshBloodlust()
+      if hasFreshBloodlust then
+        addon:DebugLog("bloodlust", "fresh bloodlust detected", expiration)
         PlayEffect(expiration)
+        return
+      end
+
+      local hasBloodlust = CheckActiveBloodlust()
+      if not hasBloodlust then
+        StopEffect()
       end
     end
   end

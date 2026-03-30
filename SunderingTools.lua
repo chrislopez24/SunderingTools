@@ -20,6 +20,8 @@ end
 local editModePriority = {
     "InterruptTracker",
     "CrowdControlTracker",
+    "PartyDefensiveTracker",
+    "DefensiveRaidTracker",
     "BloodlustSound",
 }
 

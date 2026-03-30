@@ -113,13 +113,20 @@ def test_interrupt_tracker_panel_exposes_technical_controls():
         assert removed not in source
 
 
-def test_bloodlust_sound_uses_exhaustion_aura_instead_of_spellcast_success():
+def test_bloodlust_sound_uses_active_bloodlust_aura_instead_of_exhaustion_cooldown():
     source = read("Modules/BloodlustSound.lua")
     assert "UNIT_SPELLCAST_SUCCEEDED" not in source
     assert "UNIT_AURA" in source
     assert "local lastSeenExpirationTime" in source
-    assert "local function CheckFreshExhaustion()" in source
-    assert "if hasFreshExhaustion then" in source
+    assert "local function FindActiveTriggerAura()" in source
+    assert 'C_UnitAuras.GetAuraDataByIndex("player", index, "HELPFUL")' in source
+    assert 'local normalizedName = NormalizeName(aura.name)' in source
+    assert "local function CheckFreshBloodlust()" in source
+    assert "local function CheckActiveBloodlust()" in source
+    assert "if hasFreshBloodlust then" in source
+    assert "if hasBloodlust then" in source
+    assert "CheckFreshExhaustion" not in source
+    assert "CheckExhaustion" not in source
 
 
 def test_bloodlust_sound_supports_icon_style_dropdown_and_custom_path():
@@ -134,6 +141,7 @@ def test_bloodlust_sound_supports_icon_style_dropdown_and_custom_path():
     assert "assets\\\\art\\\\pedro.tga" in source
     assert "if moduleDB.iconStyle == \"CUSTOM\" then" in source
     assert "addonRef:RefreshSettings()" in source
+    assert '"Duration"' in source
 
 
 def test_bloodlust_sound_animates_pedro_sprite_sheet():
@@ -186,6 +194,26 @@ def test_general_edit_mode_uses_global_all_state_and_bloodlust_supports_shared_e
     assert 'helpers:CreateActionButton(panel, GetEditButtonLabel()' in bloodlust_source
 
 
+def test_party_defensive_tracker_exposes_full_attachment_settings():
+    source = read("Modules/PartyDefensiveTracker.lua")
+    for setting in (
+        'addonRef:SetModuleValue("PartyDefensiveTracker", "showTooltip", value)',
+        'addonRef:SetModuleValue("PartyDefensiveTracker", "maxIcons", value)',
+        'addonRef:SetModuleValue("PartyDefensiveTracker", "iconSize", value)',
+        'addonRef:SetModuleValue("PartyDefensiveTracker", "iconSpacing", value)',
+        'addonRef:SetModuleValue("PartyDefensiveTracker", "attachPoint", value)',
+        'addonRef:SetModuleValue("PartyDefensiveTracker", "relativePoint", value)',
+        'addonRef:SetModuleValue("PartyDefensiveTracker", "offsetX", value)',
+        'addonRef:SetModuleValue("PartyDefensiveTracker", "offsetY", value)',
+    ):
+        assert setting in source
+
+    assert 'helpers:CreateActionButton(panel, "Reset Position"' in source
+    assert 'helpers:CreateDividerLabel(panel, "State"' in source
+    assert 'helpers:CreateDividerLabel(behaviorColumn, "Behavior"' in source
+    assert 'helpers:CreateDividerLabel(layoutColumn, "Layout"' in source
+
+
 def test_runtime_files_do_not_use_dofile_and_models_load_from_toc():
     toc = read("SunderingTools.toc")
     assert "Modules\\InterruptTrackerModel.lua" in toc
@@ -197,3 +225,11 @@ def test_runtime_files_do_not_use_dofile_and_models_load_from_toc():
         "Modules/BloodlustSound.lua",
     ):
         assert "dofile(" not in read(path)
+
+
+def test_defensive_trackers_do_not_spam_debug_logs_for_untracked_self_casts():
+    party_defensive = read("Modules/PartyDefensiveTracker.lua")
+    raid_defensive = read("Modules/DefensiveRaidTracker.lua")
+
+    assert 'addon:DebugLog("pdef", "self cast ignored", spellID)' not in party_defensive
+    assert 'addon:DebugLog("rdef", "self cast ignored", spellID)' not in raid_defensive

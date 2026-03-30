@@ -248,6 +248,27 @@ function Engine:ApplySyncCast(playerGUID, spellID, startTime, readyAt)
   return self:ApplyCast(playerGUID, spellID, "sync", startTime, readyAt)
 end
 
+function Engine:ApplySyncState(playerGUID, spellID, fields)
+  fields = fields or {}
+  local cooldown = fields.cd
+  if type(cooldown) ~= "number" or cooldown <= 0 then
+    cooldown = nil
+  end
+
+  return self:UpsertEntry({
+    key = resolveKey(playerGUID, spellID),
+    playerGUID = playerGUID,
+    spellID = spellID,
+    source = "sync",
+    kind = fields.kind,
+    cd = cooldown,
+    baseCd = cooldown,
+    charges = fields.charges,
+    startTime = fields.startTime,
+    readyAt = fields.readyAt,
+  })
+end
+
 function Engine:ApplySelfCast(playerGUID, spellID, startTime, readyAt)
   return self:ApplyCast(playerGUID, spellID, "self", startTime, readyAt)
 end

@@ -25,5 +25,9 @@ Modules\InterruptTrackerModel.lua
 Modules\InterruptTracker.lua
 Modules\CrowdControlTrackerModel.lua
 Modules\CrowdControlTracker.lua
+Modules\PartyDefensiveTrackerModel.lua
+Modules\PartyDefensiveTracker.lua
+Modules\DefensiveRaidTrackerModel.lua
+Modules\DefensiveRaidTracker.lua
 Modules\BloodlustSoundModel.lua
 Modules\BloodlustSound.lua

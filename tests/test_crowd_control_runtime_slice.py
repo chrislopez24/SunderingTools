@@ -87,6 +87,22 @@ def test_crowd_control_tracker_settings_shell_exposes_filter_mode_controls():
     assert 'filterModes = { "ESSENTIALS", "ALL" }' in source
 
 
+def test_crowd_control_tracker_only_registers_remote_members_after_addon_presence():
+    source = read("Modules/CrowdControlTracker.lua")
+
+    assert "partyAddonUsers = {}" in source
+    assert "runtime.partyAddonUsers[shortName]" in source or "runtime.partyAddonUsers[sourceShortName]" in source
+    assert 'runtime.partyAddonUsers[senderShort] = true' in source
+
+    refresh_start = source.index("local function RefreshRuntimeCrowdControlRegistration()")
+    refresh_end = source.index("local function UpdateAnchorVisuals(enabled)", refresh_start)
+    refresh_block = source[refresh_start:refresh_end]
+
+    assert 'RegisterRuntimeCrowdControl("player", nil, nil, {' in refresh_block
+    assert 'local unit = "party" .. i' not in refresh_block
+    assert "RegisterRuntimeCrowdControl(unit, nil, nil, {" not in refresh_block
+
+
 def test_crowd_control_tracker_supports_optional_tracker_header():
     source = read("Modules/CrowdControlTracker.lua")
 

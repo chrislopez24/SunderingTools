@@ -19,6 +19,29 @@ local function split(text, delimiter)
   return parts
 end
 
+local function encodeSpellList(spells)
+  local values = {}
+
+  for _, spellID in ipairs(spells or {}) do
+    values[#values + 1] = tostring(spellID)
+  end
+
+  return table.concat(values, ",")
+end
+
+local function decodeSpellList(text)
+  if text == nil or text == "" then
+    return {}
+  end
+
+  local spells = {}
+  for _, value in ipairs(split(text, ",")) do
+    spells[#spells + 1] = tonumber(value) or 0
+  end
+
+  return spells
+end
+
 function Sync.GetPrefix()
   return PREFIX
 end
@@ -38,6 +61,26 @@ function Sync.Encode(messageType, payload)
     return table.concat({
       "HELLO",
       payload.classToken or "",
+      tostring(payload.specID or 0),
+    }, ":")
+  end
+
+  if messageType == "DEF_MANIFEST" then
+    return table.concat({
+      "DEF_MANIFEST",
+      tostring(payload.kind or ""),
+      encodeSpellList(payload.spells),
+    }, ":")
+  end
+
+  if messageType == "DEF_STATE" then
+    return table.concat({
+      "DEF_STATE",
+      tostring(payload.spellID or 0),
+      tostring(payload.kind or ""),
+      tostring(payload.cd or 0),
+      tostring(payload.charges or 0),
+      tostring(payload.readyAt or 0),
     }, ":")
   end
 
@@ -55,6 +98,52 @@ function Sync.Decode(message)
   if messageType == "HELLO" then
     return messageType, {
       classToken = parts[2],
+      specID = tonumber(parts[3]) or 0,
+    }
+  end
+
+  if messageType == "DEF_MANIFEST" then
+    local kind = parts[2]
+    local spellsIndex = 3
+
+    if #parts == 2 then
+      kind = nil
+      spellsIndex = 2
+    elseif kind == nil or kind == "" then
+      kind = nil
+      spellsIndex = 2
+    end
+
+    return messageType, {
+      kind = kind,
+      spells = decodeSpellList(parts[spellsIndex]),
+    }
+  end
+
+  if messageType == "DEF_STATE" then
+    local kind = parts[3]
+    local cdIndex = 4
+    local chargesIndex = 5
+    local readyAtIndex = 6
+
+    if #parts == 5 then
+      kind = nil
+      cdIndex = 3
+      chargesIndex = 4
+      readyAtIndex = 5
+    elseif kind == nil or kind == "" then
+      kind = nil
+      cdIndex = 3
+      chargesIndex = 4
+      readyAtIndex = 5
+    end
+
+    return messageType, {
+      spellID = tonumber(parts[2]) or 0,
+      kind = kind,
+      cd = tonumber(parts[cdIndex]) or 0,
+      charges = tonumber(parts[chargesIndex]) or 0,
+      readyAt = tonumber(parts[readyAtIndex]) or 0,
     }
   end
 

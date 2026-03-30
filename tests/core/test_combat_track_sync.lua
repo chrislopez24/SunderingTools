@@ -2,12 +2,25 @@ local Sync = dofile("Core/CombatTrackSync.lua")
 
 local helloEncoded = Sync.Encode("HELLO", {
   classToken = "MAGE",
+  specID = 63,
 })
-assert(helloEncoded == "HELLO:MAGE", "hello payloads should match the Kryos-style handshake shape")
+assert(helloEncoded == "HELLO:MAGE:63", "hello payloads should include the announced spec id for defensive variant resolution")
 
 local helloType, helloPayload = Sync.Decode(helloEncoded)
 assert(helloType == "HELLO", "sync decode should preserve hello message type")
 assert(helloPayload.classToken == "MAGE", "sync decode should preserve the announced class token")
+assert(helloPayload.specID == 63, "sync decode should preserve the announced spec id")
+
+local manifestEncoded = Sync.Encode("DEF_MANIFEST", {
+  kind = "RAID_DEF",
+  spells = { 51052, 196718 },
+})
+assert(manifestEncoded == "DEF_MANIFEST:RAID_DEF:51052,196718", "defensive manifests should encode their tracking kind")
+
+local manifestType, manifestPayload = Sync.Decode(manifestEncoded)
+assert(manifestType == "DEF_MANIFEST", "manifest decode should preserve message type")
+assert(manifestPayload.kind == "RAID_DEF", "manifest decode should preserve the tracking kind")
+assert(manifestPayload.spells[1] == 51052 and manifestPayload.spells[2] == 196718, "manifest decode should preserve spell ids")
 
 local encoded = Sync.Encode("INT", {
   spellID = 1766,

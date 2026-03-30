@@ -126,6 +126,15 @@ def test_interrupt_tracker_registers_party_and_pet_watchers_without_party_spell_
     assert 'if unit ~= "player" then return end' in event_block
 
 
+def test_interrupt_tracker_emits_debug_logs_for_party_cast_and_correlation_paths():
+    source = read("Modules/InterruptTracker.lua")
+
+    assert 'addon:DebugLog("int", "party cast", shortName)' in source
+    assert 'addon:DebugLog("int", "corr", bestName, "delta", string.format("%.3f", bestDelta))' in source
+    assert 'addon:DebugLog("int", "corr", "self", "delta", string.format("%.3f", selfDelta))' in source
+    assert 'addon:DebugLog("int", "corr", "miss")' in source
+
+
 def test_interrupt_tracker_handles_hello_presence_and_kryos_style_solo_self_visibility():
     source = read("Modules/InterruptTracker.lua")
 

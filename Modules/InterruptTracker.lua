@@ -730,9 +730,11 @@ local function AnnouncePresence()
     end
 
     local _, classToken = UnitClass("player")
+    local specID = GetUnitSpecID("player")
     runtime.lastHelloAt = GetTime()
     Sync.Send("HELLO", {
         classToken = classToken or "UNKNOWN",
+        specID = specID,
     })
 end
 
@@ -817,7 +819,8 @@ local function HandleEnemyInterrupted()
             end
         end
 
-        if user and user.guid and user.spellID and (user.baseCd or 0) > 0 then
+    if user and user.guid and user.spellID and (user.baseCd or 0) > 0 then
+            addon:DebugLog("int", "corr", bestName, "delta", string.format("%.3f", bestDelta))
             local applied = runtime.engine:ApplyCorrelatedCast(user.guid, user.spellID, now, now + user.baseCd)
             if applied then
                 applied.playerName = bestName
@@ -828,8 +831,11 @@ local function HandleEnemyInterrupted()
             end
         end
     elseif selfDelta < 1.5 then
+        addon:DebugLog("int", "corr", "self", "delta", string.format("%.3f", selfDelta))
         runtime.lastSelfInterruptTime = 0
         UpdatePartyData()
+    else
+        addon:DebugLog("int", "corr", "miss")
     end
 end
 
@@ -869,6 +875,7 @@ local function HandlePartyWatcher(ownerUnit)
     local shortName = ShortName(UnitName(ownerUnit))
     if shortName and shortName ~= "" then
         runtime.recentPartyCasts[shortName] = GetTime()
+        addon:DebugLog("int", "party cast", shortName)
     end
 end
 
@@ -2013,7 +2020,11 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
             return
         end
 
-        addon:DebugLog("int", "recv sync", sender or "?", message or "")
+        local messageType = Sync.Decode(message)
+        if messageType == "HELLO" or messageType == "INT" then
+            addon:DebugLog("int", "recv sync", sender or "?", message or "")
+        end
+
         HandleSyncInterruptMessage(message, sender)
     end
 end)

@@ -87,6 +87,9 @@ def test_bloodlust_page_keeps_reference_sections_and_actions():
     assert 'helpers:PlaceRow(' in source
     assert "Hide Bloodlust Icon" in source
     assert "Sound Channel" in source
+    assert "Duration" in source
+    assert 'durationSlider:SetPoint("TOPLEFT", soundFileInput, "BOTTOMLEFT", 0, -10)' not in source
+    assert 'durationSlider:SetPoint("TOPLEFT", channelDropdown, "BOTTOMLEFT", 0, -10)' in source
 
 
 def test_tracker_pages_keep_environment_and_behavior_controls():
@@ -108,6 +111,25 @@ def test_tracker_pages_keep_environment_and_behavior_controls():
 
     assert "Play Ready Sound" in interrupt
     assert "Filter Mode" in crowd_control
+
+
+def test_party_defensive_page_exposes_attachment_and_tooltip_controls():
+    source = read("Modules/PartyDefensiveTracker.lua")
+    for label in (
+        "State",
+        "Behavior",
+        "Layout",
+        "Show Tooltip",
+        "Maximum Icons",
+        "Icon Size",
+        "Icon Spacing",
+        "Attach Point",
+        "Relative Point",
+        "Offset X",
+        "Offset Y",
+        "Reset Position",
+    ):
+        assert label in source
 
 
 def test_settings_section_switch_resets_scroll_position():

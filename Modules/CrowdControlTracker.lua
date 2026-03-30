@@ -85,6 +85,7 @@ local runtime = {
   partyWatchFrames = {},
   partyPetWatchFrames = {},
   partyUsers = {},
+  partyAddonUsers = {},
   recentPartyCasts = {},
   ccAuraPrevCount = {},
   lastHelloAt = 0,
@@ -290,6 +291,20 @@ local function ShortName(name)
   end
 
   return string.match(name, "^([^%-]+)") or name
+end
+
+local function GetLocalPlayerSpecID()
+  if GetSpecialization and GetSpecializationInfo then
+    local specIndex = GetSpecialization()
+    if specIndex then
+      local specID = GetSpecializationInfo(specIndex)
+      if type(specID) == "number" and specID > 0 then
+        return specID
+      end
+    end
+  end
+
+  return 0
 end
 
 local function BuildRuntimeKey(guid, spellID)
@@ -548,6 +563,7 @@ local function BuildRuntimeBarEntries()
   local entries = {}
   local unitsByToken = {}
   local now = GetTime()
+  local includeAutoFallbackBars = db.showAutoFallbackBars ~= false
 
   for _, unit in ipairs(BuildRuntimeUnitsForDisplay()) do
     unitsByToken[unit] = true
@@ -569,25 +585,29 @@ local function BuildRuntimeBarEntries()
       end
 
       local ready = startTime <= 0 or readyAt <= now
-      if not (ready and db.showReady == false) then
-        local labelName = shortName or "Unknown"
-        local spellName = (user and user.spellName) or entry.name or (GetTrackedCrowdControlInfo(entry.spellID) or {}).name or "CC"
+      local autoFallbackEntry = entry.source == "auto"
+      local isLocalPlayerEntry = entry.unitToken == "player"
+      if includeAutoFallbackBars or not autoFallbackEntry or isLocalPlayerEntry then
+        if not (ready and db.showReady == false) then
+          local labelName = shortName or "Unknown"
+          local spellName = (user and user.spellName) or entry.name or (GetTrackedCrowdControlInfo(entry.spellID) or {}).name or "CC"
 
-        entries[#entries + 1] = {
-          key = entry.key,
-          runtimeKey = entry.key,
-          userKey = userKey,
-          unit = entry.unitToken,
-          partyName = shortName,
-          name = labelName .. " - " .. spellName,
-          class = entry.classToken or (user and user.class) or select(2, UnitClass(entry.unitToken)),
-          spellID = entry.spellID,
-          cd = cooldown,
-          startTime = startTime,
-          source = entry.source,
-          kind = "CC",
-          essential = entry.essential == true or (user and user.essential == true),
-        }
+          entries[#entries + 1] = {
+            key = entry.key,
+            runtimeKey = entry.key,
+            userKey = userKey,
+            unit = entry.unitToken,
+            partyName = shortName,
+            name = labelName .. " - " .. spellName,
+            class = entry.classToken or (user and user.class) or select(2, UnitClass(entry.unitToken)),
+            spellID = entry.spellID,
+            cd = cooldown,
+            startTime = startTime,
+            source = entry.source,
+            kind = "CC",
+            essential = entry.essential == true or (user and user.essential == true),
+          }
+        end
       end
     end
   end
@@ -617,7 +637,7 @@ local function CanRecordWatcherTimestamp(ownerUnit)
   local shortName = ShortName(UnitName(ownerUnit))
   local _, classToken = UnitClass(ownerUnit)
   local primary = SpellDB.GetPrimaryCrowdControlForClass(classToken)
-  if not shortName or not primary then
+  if not shortName or not primary or not runtime.partyAddonUsers[shortName] then
     return false
   end
 
@@ -642,6 +662,7 @@ local function HandlePartyWatcher(ownerUnit)
   local shortName = ShortName(UnitName(ownerUnit))
   if shortName and shortName ~= "" then
     runtime.recentPartyCasts[shortName] = GetTime()
+    addon:DebugLog("cc", "party cast", shortName)
   end
 end
 
@@ -736,10 +757,12 @@ local function DetectCrowdControlAuras(unit)
     local _, classToken = UnitClass(candidateUnit)
     local trackedSpell = classToken and SpellDB.GetPrimaryCrowdControlForClass(classToken) or nil
     if not trackedSpell then
+      addon:DebugLog("cc", "corr", "miss", "no-primary", candidateName)
       return
     end
 
     runtime.recentPartyCasts[candidateName] = nil
+    addon:DebugLog("cc", "corr", candidateName, trackedSpell.spellID, "secret")
     ApplyObservedCrowdControl(candidateUnit, trackedSpell.spellID, trackedSpell, now)
     return
   end
@@ -761,9 +784,10 @@ local function DetectCrowdControlAuras(unit)
         local okName, sourceName = pcall(UnitName, sourceUnit)
         if okName and sourceName then
           local sourceShortName = ShortName(sourceName)
-          if sourceShortName and sourceShortName ~= playerName then
+          if sourceShortName and sourceShortName ~= playerName and runtime.partyAddonUsers[sourceShortName] then
             local sourcePartyUnit = GetUnitBySender(sourceShortName)
             if sourcePartyUnit and sourcePartyUnit ~= "player" then
+              addon:DebugLog("cc", "corr", sourceShortName, spellID, "aura")
               ApplyObservedCrowdControl(sourcePartyUnit, spellID, trackedSpell, now)
             end
           end
@@ -793,6 +817,7 @@ local function AnnouncePresence()
   runtime.lastHelloAt = GetTime()
   Sync.Send("HELLO", {
     classToken = classToken or "UNKNOWN",
+    specID = GetLocalPlayerSpecID(),
   })
 end
 
@@ -804,6 +829,11 @@ local function HandleSyncHelloMessage(payload, sender)
   local unit = GetUnitBySender(sender)
   if not unit or unit == "player" then
     return
+  end
+
+  local senderShort = ShortName(sender)
+  if senderShort and senderShort ~= "" then
+    runtime.partyAddonUsers[senderShort] = true
   end
 
   RegisterRuntimeCrowdControl(unit, nil, nil, {
@@ -833,6 +863,11 @@ local function HandleSyncCrowdControlMessage(message, sender)
   local unit = GetUnitBySender(sender)
   if not unit or unit == "player" then
     return
+  end
+
+  local senderShort = ShortName(sender)
+  if senderShort and senderShort ~= "" then
+    runtime.partyAddonUsers[senderShort] = true
   end
 
   local spellID = payload.spellID or 0
@@ -917,6 +952,12 @@ local function PruneRuntimeRoster()
     end
   end
 
+  for name in pairs(runtime.partyAddonUsers) do
+    if not currentNames[name] then
+      runtime.partyAddonUsers[name] = nil
+    end
+  end
+
   PrunePlayerKnownCrowdControl()
 end
 
@@ -931,15 +972,6 @@ local function RefreshRuntimeCrowdControlRegistration()
 
   if not IsInGroup() or IsInRaid() then
     return
-  end
-
-  for i = 1, 4 do
-    local unit = "party" .. i
-    if UnitExists(unit) then
-      RegisterRuntimeCrowdControl(unit, nil, nil, {
-        auto = true,
-      })
-    end
   end
 end
 
@@ -1075,7 +1107,7 @@ function module:buildSettings(panel, helpers, addonRef, moduleDB)
 
   local behaviorHint = helpers:CreateSectionHint(
     behaviorColumn,
-    "Choose a dungeon-focused set or the full list.",
+    "Choose a dungeon-focused set or the full list. Remote CC bars only appear for party members using the addon sync.",
     250
   )
   behaviorHint:SetPoint("TOPLEFT", showInArenaBox, "BOTTOMLEFT", 0, -12)
@@ -1751,6 +1783,7 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
 
   elseif event == "PLAYER_ENTERING_WORLD" then
     wipe(runtime.partyUsers)
+    wipe(runtime.partyAddonUsers)
     wipe(runtime.recentPartyCasts)
     wipe(runtime.ccAuraPrevCount)
     runtime.engine:Reset()
@@ -1776,6 +1809,7 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
     end)
 
   elseif event == "CHALLENGE_MODE_START" then
+    wipe(runtime.partyAddonUsers)
     wipe(runtime.recentPartyCasts)
     wipe(runtime.ccAuraPrevCount)
     runtime.lastHelloAt = 0
@@ -1864,7 +1898,11 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
       return
     end
 
-    addon:DebugLog("cc", "recv sync", sender or "?", message or "")
+    local messageType = Sync.Decode(message)
+    if messageType == "HELLO" or messageType == "CC" then
+      addon:DebugLog("cc", "recv sync", sender or "?", message or "")
+    end
+
     HandleSyncCrowdControlMessage(message, sender)
   end
 end)
