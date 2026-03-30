@@ -532,7 +532,7 @@ local function CreateSettingsFrame()
   frame.headerTitle = CreateTextBlock(frame.headerBar, "SunderingTools", "GameFontNormalLarge", 220)
   frame.headerTitle:SetPoint("LEFT", 12, 0)
 
-  frame.headerByline = CreateTextBlock(frame.headerBar, "|cffbbbbbbby ExWind|r", "GameFontHighlightSmall", 90)
+  frame.headerByline = CreateTextBlock(frame.headerBar, "|cffbbbbbbby Krich|r", "GameFontHighlightSmall", 90)
   frame.headerByline:SetPoint("LEFT", frame.headerTitle, "RIGHT", 8, -2)
 
   frame.headerMeta = CreateTextBlock(frame.headerBar, "", "GameFontHighlightSmall", 320)

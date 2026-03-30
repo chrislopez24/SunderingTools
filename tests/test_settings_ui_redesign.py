@@ -14,7 +14,7 @@ def test_settings_shell_matches_pedrolust_contract():
     assert 'frame.headerBar:SetHeight(40)' in source
     assert 'frame.sidebar:SetWidth(148)' in source
     assert 'frame.headerTitle = CreateTextBlock(frame.headerBar, "SunderingTools"' in source
-    assert 'frame.headerByline = CreateTextBlock(frame.headerBar, "|cffbbbbbbby ExWind|r"' in source
+    assert 'frame.headerByline = CreateTextBlock(frame.headerBar, "|cffbbbbbbby Krich|r"' in source
     assert 'frame.headerMeta:SetText("Dungeon utility toolkit  |  v" .. ADDON_VERSION)' not in source
     assert 'frame.headerMeta:SetText("")' in source
     assert 'CreateFrame("ScrollFrame", nil, frame.contentPane, "UIPanelScrollFrameTemplate")' in source
