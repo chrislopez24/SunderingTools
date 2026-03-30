@@ -45,6 +45,9 @@ def test_toc_no_missing_embeds_and_new_entrypoints():
 def test_release_workflow_uses_packager():
     workflow = (ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
     assert "BigWigsMods/packager" in workflow
+    assert "permissions:" in workflow
+    assert "contents: write" in workflow
+    assert "GITHUB_OAUTH: ${{ secrets.GITHUB_TOKEN }}" in workflow
 
 
 def test_required_runtime_files_are_tracked_in_git():
