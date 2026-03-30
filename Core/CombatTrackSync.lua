@@ -190,12 +190,12 @@ function Sync.GetDefaultChannel()
     return "RAID"
   end
 
-  if IsInGroup and IsInGroup(LE_PARTY_CATEGORY_INSTANCE) then
-    return "INSTANCE_CHAT"
-  end
-
   if IsInGroup and IsInGroup(LE_PARTY_CATEGORY_HOME) then
     return "PARTY"
+  end
+
+  if IsInGroup and IsInGroup(LE_PARTY_CATEGORY_INSTANCE) then
+    return "INSTANCE_CHAT"
   end
 
   return nil
@@ -211,23 +211,49 @@ function Sync.Send(messageType, payload, channel)
   end
 
   local encoded = Sync.Encode(messageType, payload)
-  local resolvedChannel = channel or Sync.GetDefaultChannel()
-  if not resolvedChannel then
-    return false
+
+  local function buildChannels()
+    if channel then
+      return { channel }
+    end
+
+    if IsInRaid and IsInRaid() then
+      return { "RAID" }
+    end
+
+    local channels = {}
+    if IsInGroup and IsInGroup(LE_PARTY_CATEGORY_HOME) then
+      channels[#channels + 1] = "PARTY"
+    end
+    if IsInGroup and IsInGroup(LE_PARTY_CATEGORY_INSTANCE) then
+      channels[#channels + 1] = "INSTANCE_CHAT"
+    end
+    return channels
   end
 
-  local send = function()
+  local function sendOnce()
     if IsInGroup and not IsInGroup() then
       return false
     end
 
-    return C_ChatInfo.SendAddonMessage(PREFIX, encoded, resolvedChannel)
+    local channels = buildChannels()
+    if not channels or #channels == 0 then
+      return false
+    end
+
+    for _, resolvedChannel in ipairs(channels) do
+      if C_ChatInfo.SendAddonMessage(PREFIX, encoded, resolvedChannel) then
+        return true
+      end
+    end
+
+    return false
   end
 
-  local result = send()
+  local result = sendOnce()
   if C_Timer and C_Timer.After then
-    C_Timer.After(0.05, send)
-    C_Timer.After(0.10, send)
+    C_Timer.After(0.05, sendOnce)
+    C_Timer.After(0.10, sendOnce)
   end
 
   return result

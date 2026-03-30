@@ -103,6 +103,11 @@ IsInGroup = function(category)
 end
 assert(Sync.GetDefaultChannel() == "PARTY", "party should be the default addon channel")
 
+IsInGroup = function(category)
+  return category == nil or category == LE_PARTY_CATEGORY_HOME or category == LE_PARTY_CATEGORY_INSTANCE
+end
+assert(Sync.GetDefaultChannel() == "PARTY", "home party should win when both home and instance categories report true")
+
 local sendCalls = {}
 local delayedCalls = {}
 local originalTimer = C_Timer
@@ -114,6 +119,9 @@ C_Timer = {
 }
 C_ChatInfo = {
   SendAddonMessage = function(prefix, message, channel)
+    if channel == "PARTY" then
+      return false
+    end
     sendCalls[#sendCalls + 1] = {
       prefix = prefix,
       message = message,
@@ -132,17 +140,17 @@ assert(Sync.Send("INT", {
 }) == false, "sync should not try to broadcast outside a group")
 
 IsInGroup = function(category)
-  return category == nil or category == LE_PARTY_CATEGORY_HOME
+  return category == nil or category == LE_PARTY_CATEGORY_HOME or category == LE_PARTY_CATEGORY_INSTANCE
 end
 assert(Sync.Send("CC", {
   spellID = 51514,
   cd = 30,
 }) == true, "sync send should return the chat API result")
 
-assert(#sendCalls == 3, "sync send should issue the Kryos-style reliable triple broadcast")
+assert(#sendCalls == 3, "sync send should issue the Kryos-style reliable triple broadcast on the fallback channel")
 assert(delayedCalls[1] == 0.05 and delayedCalls[2] == 0.10, "sync send should schedule the staggered retry delays")
 assert(sendCalls[1].prefix == Sync.GetPrefix(), "sync send should use the combat tracking prefix")
-assert(sendCalls[1].channel == "PARTY", "sync send should default to the resolved channel")
+assert(sendCalls[1].channel == "INSTANCE_CHAT", "sync send should fall back to the instance channel if party broadcast fails")
 
 local sentType, sentPayload = Sync.Decode(sendCalls[1].message)
 assert(sentType == "CC", "sync send should encode the provided message type")
