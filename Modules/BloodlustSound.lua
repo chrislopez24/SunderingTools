@@ -64,14 +64,14 @@ local BLOODLUST_AURA_IDS = {
   390386, -- Fury of the Aspects
   381301,
 }
-local BLOODLUST_AURA_NAMES = {
-  ["bloodlust"] = true,
-  ["heroism"] = true,
-  ["time warp"] = true,
-  ["primal rage"] = true,
-  ["drums of fury"] = true,
-  ["drums of the mountain"] = true,
-  ["fury of the aspects"] = true,
+local BLOODLUST_AURA_FALLBACK_NAMES = {
+  "bloodlust",
+  "heroism",
+  "time warp",
+  "primal rage",
+  "drums of fury",
+  "drums of the mountain",
+  "fury of the aspects",
 }
 local LOCKOUT_AURA_IDS = {
   57723,  -- Exhaustion
@@ -87,6 +87,7 @@ local activeTimer
 local lastSeenExpirationTime
 local editModeEnabled = false
 local displayState = "HIDDEN"
+local bloodlustAuraNames
 
 local RefreshAuraState
 
@@ -128,6 +129,34 @@ local function SanitizeAuraAsset(value)
   return value
 end
 
+local function BuildAuraNameSet(spellIDs, fallbackNames)
+  local names = {}
+
+  for _, fallbackName in ipairs(fallbackNames or {}) do
+    names[fallbackName] = true
+  end
+
+  for _, spellID in ipairs(spellIDs or {}) do
+    local spellName =
+      (C_Spell and C_Spell.GetSpellName and C_Spell.GetSpellName(spellID))
+      or (GetSpellInfo and GetSpellInfo(spellID))
+    local normalizedName = NormalizeName(spellName)
+    if normalizedName then
+      names[normalizedName] = true
+    end
+  end
+
+  return names
+end
+
+local function GetBloodlustAuraNames()
+  if not bloodlustAuraNames then
+    bloodlustAuraNames = BuildAuraNameSet(BLOODLUST_AURA_IDS, BLOODLUST_AURA_FALLBACK_NAMES)
+  end
+
+  return bloodlustAuraNames
+end
+
 local function IsTrackedTriggerAura(spellID, normalizedName)
   spellID = SanitizeAuraNumber(spellID)
   if spellID then
@@ -138,7 +167,7 @@ local function IsTrackedTriggerAura(spellID, normalizedName)
     end
   end
 
-  return normalizedName ~= nil and BLOODLUST_AURA_NAMES[normalizedName] == true
+  return normalizedName ~= nil and GetBloodlustAuraNames()[normalizedName] == true
 end
 
 local function IsTrackedLockoutAura(spellID)

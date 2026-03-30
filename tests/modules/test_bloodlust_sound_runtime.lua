@@ -35,6 +35,7 @@ local function loadModule(moduleDB)
     inGroup = false,
     auras = {},
     helpfulAuras = {},
+    spellNames = {},
     soundCalls = {},
     stoppedSounds = {},
     shell = nil,
@@ -210,8 +211,15 @@ local function loadModule(moduleDB)
       end
       return "texture:" .. tostring(spellID)
     end,
+    GetSpellName = function(spellID)
+      return state.spellNames[spellID]
+    end,
   }
   _G.GetSpellInfo = function(spellID)
+    if state.spellNames[spellID] then
+      return state.spellNames[spellID]
+    end
+
     local aura = state.auras[spellID]
     if aura and aura.name then
       return aura.name
@@ -441,6 +449,25 @@ do
   assert(state.shell.shown == true, "a secret spell id should not prevent the active bloodlust frame from showing")
   assert(state.shell.icon and state.shell.icon.texture == "texture:2825", "a secret spell id should fall back to the default bloodlust texture")
   assert(state.shell.cooldown.cooldownDuration == 40, "a secret spell id should still preserve the live aura expiration time")
+end
+
+do
+  local state = loadModule()
+  state.spellNames[2825] = "Ansia de sangre"
+  state.spellNames[80353] = "Distorsion temporal"
+  state.helpfulAuras[1] = {
+    spellId = state.secretSpellID,
+    name = "Distorsion temporal",
+    expirationTime = 140,
+    icon = "timewarp",
+  }
+
+  state.onEvent(nil, "PLAYER_LOGIN")
+
+  assert(#state.soundCalls == 1, "localized bloodlust names should trigger even when the active aura spell id is secret")
+  assert(state.shell.shown == true, "localized bloodlust names should still show the active tracker state")
+  assert(state.shell.cooldown.cooldownDuration == 40, "localized bloodlust names should preserve the live aura expiration time")
+  assert(state.shell.statusText == nil or state.shell.statusText.shown == false, "localized bloodlust names should not fall through to lockout state")
 end
 
 do
