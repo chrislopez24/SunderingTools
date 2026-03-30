@@ -2,6 +2,7 @@ package-as: SunderingTools
 enable-nolib-creation: no
 ignore:
   - .github
+  - AGENTS.md
   - docs
   - tests
   - README.md

@@ -73,14 +73,29 @@ local BLOODLUST_AURA_NAMES = {
   ["drums of the mountain"] = true,
   ["fury of the aspects"] = true,
 }
+local LOCKOUT_AURA_IDS = {
+  57723,  -- Exhaustion
+  57724,  -- Sated
+  80354,  -- Temporal Displacement
+  264689, -- Fatigued
+  390435, -- Exhaustion
+}
+local DEFAULT_LOCKOUT_DURATION = 600
 
 local frame
 local activeTimer
 local lastSeenExpirationTime
 local editModeEnabled = false
+local displayState = "HIDDEN"
+
+local RefreshAuraState
 
 local function NormalizeName(value)
   if type(value) ~= "string" then
+    return nil
+  end
+
+  if issecretvalue and issecretvalue(value) then
     return nil
   end
 
@@ -105,6 +120,20 @@ local function IsTrackedTriggerAura(spellID, normalizedName)
   return normalizedName ~= nil and BLOODLUST_AURA_NAMES[normalizedName] == true
 end
 
+local function IsTrackedLockoutAura(spellID)
+  if type(spellID) ~= "number" then
+    return false
+  end
+
+  for _, trackedSpellID in ipairs(LOCKOUT_AURA_IDS) do
+    if trackedSpellID == spellID then
+      return true
+    end
+  end
+
+  return false
+end
+
 local function FindActiveTriggerAura()
   if C_UnitAuras and C_UnitAuras.GetAuraDataByIndex then
     local index = 1
@@ -114,8 +143,12 @@ local function FindActiveTriggerAura()
         break
       end
 
+      if IsTrackedTriggerAura(aura.spellId, nil) then
+        return true, aura.expirationTime, aura
+      end
+
       local normalizedName = NormalizeName(aura.name)
-      if IsTrackedTriggerAura(aura.spellId, normalizedName) then
+      if IsTrackedTriggerAura(nil, normalizedName) then
         return true, aura.expirationTime, aura
       end
 
@@ -130,8 +163,18 @@ local function FindActiveTriggerAura()
         break
       end
 
+      if IsTrackedTriggerAura(spellID, nil) then
+        return true, expirationTime, {
+          spellId = spellID,
+          name = name,
+          icon = icon,
+          iconFileID = icon,
+          expirationTime = expirationTime,
+        }
+      end
+
       local normalizedName = NormalizeName(name)
-      if IsTrackedTriggerAura(spellID, normalizedName) then
+      if IsTrackedTriggerAura(nil, normalizedName) then
         return true, expirationTime, {
           spellId = spellID,
           name = name,
@@ -144,6 +187,50 @@ local function FindActiveTriggerAura()
   end
 
   return false, nil, nil
+end
+
+local function GetPlayerAuraBySpellID(spellID)
+  if not (C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID) then
+    return nil
+  end
+
+  local ok, aura = pcall(C_UnitAuras.GetPlayerAuraBySpellID, spellID)
+  if ok then
+    return aura
+  end
+
+  return nil
+end
+
+local function FindActiveLockoutAura()
+  for _, spellID in ipairs(LOCKOUT_AURA_IDS) do
+    local aura = GetPlayerAuraBySpellID(spellID)
+    if aura then
+      return true, aura.expirationTime, aura, aura.duration
+    end
+  end
+
+  if UnitAura then
+    for index = 1, 40 do
+      local name, icon, _, _, duration, expirationTime, _, _, _, spellID = UnitAura("player", index, "HARMFUL")
+      if not name then
+        break
+      end
+
+      if IsTrackedLockoutAura(spellID) then
+        return true, expirationTime, {
+          spellId = spellID,
+          name = name,
+          icon = icon,
+          iconFileID = icon,
+          expirationTime = expirationTime,
+          duration = duration,
+        }, duration
+      end
+    end
+  end
+
+  return false, nil, nil, nil
 end
 
 local function IsPedroStyle()
@@ -222,13 +309,53 @@ local function UpdateIconTexture()
   frame.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
 end
 
+local function SetTimerText(value)
+  if not frame or not frame.timerText then
+    return
+  end
+
+  frame.timerText:SetText(value or "")
+end
+
+local function SetStatusText(value, r, g, b)
+  if not frame or not frame.statusText then
+    return
+  end
+
+  if value and value ~= "" then
+    frame.statusText:SetText(value)
+    frame.statusText:SetTextColor(r or 1, g or 1, b or 1)
+    frame.statusText:Show()
+  else
+    frame.statusText:SetText("")
+    frame.statusText:Hide()
+  end
+end
+
+local function SetStatusLayout(anchorPoint, relativeTo, relativePoint, offsetX, offsetY, fontSize)
+  if not frame or not frame.statusText then
+    return
+  end
+
+  frame.statusText:ClearAllPoints()
+  frame.statusText:SetPoint(anchorPoint, relativeTo or frame, relativePoint or anchorPoint, offsetX or 0, offsetY or 0)
+  frame.statusText:SetFont("Fonts\\FRIZQT__.TTF", fontSize or 13, "OUTLINE")
+end
+
+local function StopTicker()
+  if activeTimer then
+    activeTimer:Cancel()
+    activeTimer = nil
+  end
+end
+
 local function UpdateFrameVisibility()
   if not frame or not db then
     return
   end
 
   local shouldShow = editModeEnabled
-    or (db.enabled and not db.hideIcon and activeTimer ~= nil)
+    or (db.enabled and not db.hideIcon and displayState ~= "HIDDEN")
 
   if shouldShow then
     frame:Show()
@@ -256,6 +383,11 @@ end
 local function CheckActiveBloodlust()
   local hasAura, expirationTime = FindActiveTriggerAura()
   return hasAura, expirationTime
+end
+
+local function CheckActiveLockout()
+  local hasAura, expirationTime, aura, duration = FindActiveLockoutAura()
+  return hasAura, expirationTime, aura, duration
 end
 
 local function CheckFreshBloodlust()
@@ -311,6 +443,12 @@ local function EnsureFrame()
   frame.timerText:SetFont("Fonts\\FRIZQT__.TTF", 24, "OUTLINE")
   frame.timerText:SetTextColor(1, 1, 0)
 
+  frame.statusText = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  frame.statusText:SetPoint("TOP", frame, "BOTTOM", 0, -4)
+  frame.statusText:SetFont("Fonts\\FRIZQT__.TTF", 13, "OUTLINE")
+  frame.statusText:SetTextColor(0.4, 1, 0.4)
+  frame.statusText:Hide()
+
   frame:SetScript("OnDragStart", function(self)
     if not editModeEnabled then
       return
@@ -356,11 +494,89 @@ local function StopEffect()
     module.lastHandle = nil
   end
 
-  if activeTimer then
-    activeTimer:Cancel()
-    activeTimer = nil
+  StopTicker()
+  displayState = "HIDDEN"
+  if frame and frame.cooldown then
+    frame.cooldown:SetCooldown(0, 0)
+  end
+  SetTimerText("")
+  SetStatusText(nil)
+  UpdateFrameVisibility()
+end
+
+local function ShowReadyState()
+  if not db or not db.enabled then
+    StopEffect()
+    return
   end
 
+  StopTicker()
+  displayState = "READY"
+
+  local displayFrame = EnsureFrame()
+  if not displayFrame then
+    return
+  end
+
+  if displayFrame.cooldown then
+    displayFrame.cooldown:SetCooldown(0, 0)
+  end
+  UpdateIconTexture()
+  SetTimerText("")
+  SetStatusLayout("CENTER", displayFrame, "CENTER", 0, 0, 24)
+  SetStatusText("BL READY", 0.2, 1, 0.2)
+  UpdateFrameVisibility()
+end
+
+local function ShowLockoutState(expirationTime, aura, duration)
+  if not db or not db.enabled then
+    StopEffect()
+    return
+  end
+
+  StopTicker()
+  displayState = "LOCKOUT"
+
+  local displayFrame = EnsureFrame()
+  if not displayFrame then
+    return
+  end
+
+  local texture = aura and (aura.icon or aura.iconFileID)
+  if texture then
+    displayFrame.icon:SetTexture(texture)
+    displayFrame.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+  else
+    UpdateIconTexture()
+  end
+
+  local now = GetTime()
+  local lockoutDuration = duration
+  if expirationTime and expirationTime > now and (not lockoutDuration or lockoutDuration <= 0) then
+    lockoutDuration = expirationTime - now
+  end
+  if not lockoutDuration or lockoutDuration <= 0 then
+    lockoutDuration = DEFAULT_LOCKOUT_DURATION
+    expirationTime = now + lockoutDuration
+  end
+
+  local startTime = expirationTime - lockoutDuration
+  displayFrame.cooldown:SetCooldown(startTime, lockoutDuration)
+  SetStatusLayout("TOP", displayFrame, "BOTTOM", 0, -4, 13)
+  SetStatusText("LOCKOUT", 1, 0.85, 0.2)
+
+  local function tick()
+    local timeLeft = expirationTime - GetTime()
+    if timeLeft <= 0 then
+      RefreshAuraState()
+      return
+    end
+
+    SetTimerText(math.ceil(timeLeft))
+  end
+
+  tick()
+  activeTimer = C_Timer.NewTicker(0.1, tick)
   UpdateFrameVisibility()
 end
 
@@ -368,6 +584,7 @@ local function PlayEffect(expirationTime, forcePlay)
   if not db or (not db.enabled and not forcePlay) then return end
 
   StopEffect()
+  displayState = "ACTIVE"
 
   local channel = Model.NormalizeChannel(db.soundChannel)
   if db.soundFile and db.soundFile ~= "" then
@@ -383,6 +600,8 @@ local function PlayEffect(expirationTime, forcePlay)
   if not displayFrame then return end
 
   UpdateIconTexture()
+  SetStatusLayout("TOP", displayFrame, "BOTTOM", 0, -4, 13)
+  SetStatusText(nil)
   displayFrame:Show()
 
   local now = GetTime()
@@ -396,19 +615,19 @@ local function PlayEffect(expirationTime, forcePlay)
   local startedAt = now
 
   displayFrame.cooldown:SetCooldown(now, duration)
-  displayFrame.timerText:SetText(math.ceil(duration))
+  SetTimerText(math.ceil(duration))
 
   activeTimer = C_Timer.NewTicker(0.1, function()
     local timeLeft = endTime - GetTime()
     if timeLeft <= 0 then
-      StopEffect()
+      RefreshAuraState()
     else
       if IsPedroStyle() then
         local elapsed = GetTime() - startedAt
         local frameIndex = math.floor(elapsed * PEDRO_FPS) % PEDRO_FRAME_COUNT
         ApplyPedroFrame(frameIndex)
       end
-      displayFrame.timerText:SetText(math.ceil(timeLeft))
+      SetTimerText(math.ceil(timeLeft))
     end
   end)
 
@@ -425,6 +644,7 @@ end
 
 function module:Stop()
   StopEffect()
+  RefreshAuraState()
 end
 
 function module:SetEditMode(enabled)
@@ -561,6 +781,7 @@ function module:onConfigChanged(_, moduleDB, key)
   if key == "enabled" then
     if moduleDB.enabled then
       EnsureFrame()
+      RefreshAuraState()
     else
       StopEffect()
     end
@@ -570,8 +791,7 @@ function module:onConfigChanged(_, moduleDB, key)
 
   if key == "hideIcon" then
     EnsureFrame()
-    UpdateIconTexture()
-    UpdateFrameVisibility()
+    RefreshAuraState()
     return
   end
 
@@ -583,9 +803,34 @@ function module:onConfigChanged(_, moduleDB, key)
 
   if key == "iconStyle" or key == "customIconPath" then
     EnsureFrame()
-    UpdateIconTexture()
-    UpdateFrameVisibility()
+    RefreshAuraState()
   end
+end
+
+RefreshAuraState = function()
+  if not db or not db.enabled then
+    StopEffect()
+    return
+  end
+
+  local hasBloodlust, expiration = CheckActiveBloodlust()
+  if hasBloodlust then
+    if expiration then
+      lastSeenExpirationTime = expiration
+    end
+    if displayState ~= "ACTIVE" then
+      PlayEffect(expiration, true)
+    end
+    return
+  end
+
+  local hasLockout, lockoutExpiration, aura, duration = CheckActiveLockout()
+  if hasLockout then
+    ShowLockoutState(lockoutExpiration, aura, duration)
+    return
+  end
+
+  ShowReadyState()
 end
 
 local eventFrame = CreateFrame("Frame")
@@ -600,12 +845,9 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
       EnsureFrame()
       local hasBloodlust, expiration = CheckActiveBloodlust()
       if hasBloodlust then
-        lastSeenExpirationTime = expiration
         addon:DebugLog("bloodlust", "resume active effect", expiration)
-        PlayEffect(expiration)
-      else
-        UpdateFrameVisibility()
       end
+      RefreshAuraState()
     end
     return
   end
@@ -620,10 +862,7 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
         return
       end
 
-      local hasBloodlust = CheckActiveBloodlust()
-      if not hasBloodlust then
-        StopEffect()
-      end
+      RefreshAuraState()
     end
   end
 end)

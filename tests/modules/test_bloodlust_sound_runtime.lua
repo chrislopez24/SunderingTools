@@ -37,6 +37,7 @@ local function loadModule(moduleDB)
     stoppedSounds = {},
     shell = nil,
     ticker = nil,
+    secretName = "__SECRET_AURA_NAME__",
   }
 
   local function newUiObject(parent)
@@ -251,6 +252,15 @@ local function loadModule(moduleDB)
   end
   _G.SlashCmdList = {}
 
+  local originalLower = string.lower
+  string.lower = function(value)
+    if value == state.secretName then
+      error("attempt to perform string conversion on a secret string value", 0)
+    end
+
+    return originalLower(value)
+  end
+
   dofile("Modules/BloodlustSound.lua")
 
   local eventFrame = createdFrames[#createdFrames]
@@ -268,30 +278,38 @@ end
 
 do
   local state = loadModule()
-  state.auras[57724] = {
-    expirationTime = 700,
-    icon = "sated",
-  }
-
   state.onEvent(nil, "PLAYER_LOGIN")
 
   assert(state.shell ~= nil, "bloodlust frame should initialize on login when enabled")
-  assert(state.shell.shown == false, "exhaustion alone should not show the bloodlust frame")
-  assert(#state.soundCalls == 0, "exhaustion alone should not play the bloodlust sound")
+  assert(state.shell.shown == true, "ready state should show the bloodlust frame when no lockout is active")
+  assert(state.shell.statusText and state.shell.statusText.text == "BL READY", "ready state should show the larger BL READY label")
+  assert(state.shell.statusText.font and state.shell.statusText.font[2] == 24, "ready state should use a larger status label size")
+  assert(state.shell.timerText.text == "", "ready state should not show an active countdown")
+  assert(#state.soundCalls == 0, "ready state should not play the bloodlust sound")
 end
 
 do
   local state = loadModule()
-  state.onEvent(nil, "PLAYER_LOGIN")
-
   state.auras[57724] = {
+    spellId = 57724,
+    name = "Sated",
     expirationTime = 700,
+    duration = 600,
     icon = "sated",
   }
+
+  state.onEvent(nil, "PLAYER_LOGIN")
+
+  assert(state.shell.shown == true, "lockout state should keep the tracker visible")
+  assert(state.shell.statusText and state.shell.statusText.text == "LOCKOUT", "lockout state should label the tracker")
+  assert(state.shell.cooldown.cooldownDuration == 600, "lockout state should use the live debuff duration")
+  assert(state.shell.timerText.text == 600, "lockout state should show the remaining debuff time")
+  assert(#state.soundCalls == 0, "lockout state should not play the bloodlust sound")
+
+  state.auras[57724] = nil
   state.onEvent(nil, "UNIT_AURA", "player")
 
-  assert(state.shell.shown == false, "unit aura updates with exhaustion only should not show the bloodlust frame")
-  assert(#state.soundCalls == 0, "unit aura updates with exhaustion only should not play the bloodlust sound")
+  assert(state.shell.statusText and state.shell.statusText.text == "BL READY", "clearing the lockout should restore the BL READY state")
 end
 
 do
@@ -310,11 +328,12 @@ do
   assert(state.shell.cooldown.cooldownStart == 100, "the cooldown swipe should start at the current time")
   assert(state.shell.cooldown.cooldownDuration == 30, "the cooldown swipe should use the active aura duration instead of the fallback duration")
   assert(state.shell.timerText.text == 30, "the timer should reflect the active buff duration")
+  assert(state.shell.statusText == nil or state.shell.statusText.shown == false, "active bloodlust should hide the ready/lockout label")
 
   state.helpfulAuras[1] = nil
   state.onEvent(nil, "UNIT_AURA", "player")
 
-  assert(state.shell.shown == false, "removing the bloodlust buff should hide the frame immediately")
+  assert(state.shell.statusText and state.shell.statusText.text == "BL READY", "removing the bloodlust buff should return to the BL READY state")
 end
 
 do
@@ -331,4 +350,44 @@ do
   assert(#state.soundCalls == 1, "known bloodlust fallback names should trigger even when the spell ID is not in the fixed player-aura lookup")
   assert(state.shell.shown == true, "known bloodlust fallback names should still show the frame")
   assert(state.shell.cooldown.cooldownDuration == 18, "fallback-name detection should still use the live aura expiration time")
+  assert(state.shell.statusText == nil or state.shell.statusText.shown == false, "fallback-name bloodlust should still use the active-effect view")
+end
+
+do
+  local state = loadModule()
+  state.auras[57724] = {
+    spellId = 57724,
+    name = "Sated",
+    expirationTime = 700,
+    duration = 600,
+    icon = "sated",
+  }
+  state.helpfulAuras[1] = {
+    spellId = 80353,
+    name = "Time Warp",
+    expirationTime = 140,
+    icon = "timewarp",
+  }
+
+  state.onEvent(nil, "PLAYER_LOGIN")
+
+  assert(#state.soundCalls == 1, "an active bloodlust buff should take priority over the lockout display")
+  assert(state.shell.cooldown.cooldownDuration == 40, "active bloodlust should continue to drive the countdown while lockout is also present")
+  assert(state.shell.statusText == nil or state.shell.statusText.shown == false, "active bloodlust should hide the lockout label while the buff is up")
+end
+
+do
+  local state = loadModule()
+  state.helpfulAuras[1] = {
+    spellId = 80353,
+    name = state.secretName,
+    expirationTime = 140,
+    icon = "timewarp",
+  }
+
+  state.onEvent(nil, "PLAYER_LOGIN")
+
+  assert(#state.soundCalls == 1, "tracked bloodlust spell IDs should not require normalizing a secret aura name")
+  assert(state.shell.shown == true, "tracked bloodlust spell IDs should still show the frame when the aura name is secret")
+  assert(state.shell.cooldown.cooldownDuration == 40, "tracked bloodlust spell IDs should still use the active aura expiration time")
 end
