@@ -72,11 +72,9 @@ def test_interrupt_tracker_panel_exposes_technical_controls():
         "Bar Height",
         "Icon Size",
         "Font Size",
-        "Show Preview When Solo",
         "Enable Party Sync",
     ):
         assert label in source
-    assert 'addonRef:SetModuleValue("InterruptTracker", "previewWhenSolo", value)' in source
     assert 'addonRef:SetModuleValue("InterruptTracker", "iconSize", value)' in source
     assert 'addonRef:SetModuleValue("InterruptTracker", "fontSize", value)' in source
     assert 'addonRef.db.global.activeEditModule == "InterruptTracker"' in source
@@ -117,6 +115,10 @@ def test_bloodlust_sound_uses_active_bloodlust_aura_instead_of_exhaustion_cooldo
     source = read("Modules/BloodlustSound.lua")
     assert "UNIT_SPELLCAST_SUCCEEDED" not in source
     assert "UNIT_AURA" in source
+    assert "PLAYER_REGEN_DISABLED" in source
+    assert "PLAYER_REGEN_ENABLED" in source
+    assert "local function ShouldShowReadyState()" in source
+    assert "InCombatLockdown()" in source
     assert "local lastSeenExpirationTime" in source
     assert "local function FindActiveTriggerAura()" in source
     assert 'C_UnitAuras.GetAuraDataByIndex("player", index, "HELPFUL")' in source
@@ -175,6 +177,7 @@ def test_crowd_control_and_sundering_shell_use_consistent_setting_state_labels()
     assert "activeEditModule = nil" in shell_source
     assert "self.db.global.activeEditModule = self.db.global.editMode and activeKey or nil" in shell_source
     assert "Track crowd control, choose the filter, and adjust layout." in cc_source
+    assert "Show Preview When Solo" not in cc_source
 
 
 def test_general_edit_mode_uses_global_all_state_and_bloodlust_supports_shared_edit_flow():
@@ -212,6 +215,14 @@ def test_party_defensive_tracker_exposes_full_attachment_settings():
     assert 'helpers:CreateDividerLabel(panel, "State"' in source
     assert 'helpers:CreateDividerLabel(behaviorColumn, "Behavior"' in source
     assert 'helpers:CreateDividerLabel(layoutColumn, "Layout"' in source
+
+
+def test_interrupt_and_raid_tracker_settings_drop_preview_toggle_from_ui():
+    interrupt = read("Modules/InterruptTracker.lua")
+    raid = read("Modules/DefensiveRaidTracker.lua")
+
+    assert "Show Preview When Solo" not in interrupt
+    assert "Show Preview When Solo" not in raid
 
 
 def test_runtime_files_do_not_use_dofile_and_models_load_from_toc():

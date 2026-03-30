@@ -31,6 +31,8 @@ local function loadModule(moduleDB)
   local createdFrames = {}
   local state = {
     now = 100,
+    inCombat = false,
+    inGroup = false,
     auras = {},
     helpfulAuras = {},
     soundCalls = {},
@@ -240,6 +242,15 @@ local function loadModule(moduleDB)
   _G.GetTime = function()
     return state.now
   end
+  _G.InCombatLockdown = function()
+    return state.inCombat
+  end
+  _G.IsInGroup = function()
+    return state.inGroup
+  end
+  _G.IsInRaid = function()
+    return false
+  end
   _G.PlaySoundFile = function(path, channel)
     state.soundCalls[#state.soundCalls + 1] = {
       path = path,
@@ -281,11 +292,26 @@ do
   state.onEvent(nil, "PLAYER_LOGIN")
 
   assert(state.shell ~= nil, "bloodlust frame should initialize on login when enabled")
-  assert(state.shell.shown == true, "ready state should show the bloodlust frame when no lockout is active")
-  assert(state.shell.statusText and state.shell.statusText.text == "BL READY", "ready state should show the larger BL READY label")
+  assert(state.shell.shown == false, "ready state should stay hidden outside combat when no lockout is active")
+  assert(state.shell.statusText == nil or state.shell.statusText.shown == false, "ready state label should stay hidden outside combat")
+  assert(#state.soundCalls == 0, "ready state should not play the bloodlust sound")
+
+  state.inCombat = true
+  state.inGroup = false
+  state.onEvent(nil, "PLAYER_REGEN_DISABLED")
+  assert(state.shell.shown == false, "ready state should stay hidden in combat when not grouped")
+
+  state.inGroup = true
+  state.onEvent(nil, "PLAYER_REGEN_DISABLED")
+
+  assert(state.shell.shown == true, "ready state should show the bloodlust frame after entering combat")
+  assert(state.shell.statusText and state.shell.statusText.text == "BL READY", "ready state should show the larger BL READY label in grouped combat")
   assert(state.shell.statusText.font and state.shell.statusText.font[2] == 24, "ready state should use a larger status label size")
   assert(state.shell.timerText.text == "", "ready state should not show an active countdown")
-  assert(#state.soundCalls == 0, "ready state should not play the bloodlust sound")
+
+  state.inCombat = false
+  state.onEvent(nil, "PLAYER_REGEN_ENABLED")
+  assert(state.shell.shown == false, "ready state should hide again when leaving combat")
 end
 
 do
@@ -309,7 +335,7 @@ do
   state.auras[57724] = nil
   state.onEvent(nil, "UNIT_AURA", "player")
 
-  assert(state.shell.statusText and state.shell.statusText.text == "BL READY", "clearing the lockout should restore the BL READY state")
+  assert(state.shell.shown == false, "clearing the lockout outside combat should keep the tracker hidden")
 end
 
 do
@@ -333,7 +359,7 @@ do
   state.helpfulAuras[1] = nil
   state.onEvent(nil, "UNIT_AURA", "player")
 
-  assert(state.shell.statusText and state.shell.statusText.text == "BL READY", "removing the bloodlust buff should return to the BL READY state")
+  assert(state.shell.shown == false, "removing the bloodlust buff outside combat should hide the ready state")
 end
 
 do

@@ -504,6 +504,12 @@ local function StopEffect()
   UpdateFrameVisibility()
 end
 
+local function ShouldShowReadyState()
+  local inCombat = InCombatLockdown and InCombatLockdown() or false
+  local inGroup = (IsInGroup and IsInGroup()) or (IsInRaid and IsInRaid()) or false
+  return inCombat and inGroup
+end
+
 local function ShowReadyState()
   if not db or not db.enabled then
     StopEffect()
@@ -830,12 +836,18 @@ RefreshAuraState = function()
     return
   end
 
-  ShowReadyState()
+  if ShouldShowReadyState() then
+    ShowReadyState()
+  else
+    StopEffect()
+  end
 end
 
 local eventFrame = CreateFrame("Frame")
 
 eventFrame:RegisterEvent("PLAYER_LOGIN")
+eventFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
+eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 eventFrame:RegisterEvent("UNIT_AURA")
 
 eventFrame:SetScript("OnEvent", function(_, event, ...)
@@ -849,6 +861,11 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
       end
       RefreshAuraState()
     end
+    return
+  end
+
+  if event == "PLAYER_REGEN_DISABLED" or event == "PLAYER_REGEN_ENABLED" then
+    RefreshAuraState()
     return
   end
 

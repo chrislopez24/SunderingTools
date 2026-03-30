@@ -869,15 +869,10 @@ function module:buildSettings(panel, helpers, addonRef, moduleDB)
   local behaviorBody = helpers:CreateSectionHint(behaviorColumn, "Preview, visibility, and sync options.", 250)
   behaviorBody:SetPoint("TOPLEFT", behaviorLabel, "BOTTOMLEFT", 0, -8)
 
-  local previewWhenSoloBox = helpers:CreateInlineCheckbox(behaviorColumn, "Show Preview When Solo", moduleDB.previewWhenSolo, function(value)
-    addonRef:SetModuleValue("DefensiveRaidTracker", "previewWhenSolo", value)
-  end)
-  previewWhenSoloBox:SetPoint("TOPLEFT", behaviorBody, "BOTTOMLEFT", 0, -12)
-
   local syncEnabledBox = helpers:CreateInlineCheckbox(behaviorColumn, "Enable Party Sync", moduleDB.syncEnabled, function(value)
     addonRef:SetModuleValue("DefensiveRaidTracker", "syncEnabled", value)
   end)
-  syncEnabledBox:SetPoint("TOPLEFT", previewWhenSoloBox, "BOTTOMLEFT", 0, -8)
+  syncEnabledBox:SetPoint("TOPLEFT", behaviorBody, "BOTTOMLEFT", 0, -12)
 
   local strictSyncBox = helpers:CreateInlineCheckbox(behaviorColumn, "Strict Sync Mode", moduleDB.strictSyncMode == true, function(value)
     addonRef:SetModuleValue("DefensiveRaidTracker", "strictSyncMode", value)

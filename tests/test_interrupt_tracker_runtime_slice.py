@@ -102,7 +102,6 @@ def test_interrupt_tracker_settings_shell_matches_tracker_controls():
     assert '"Reset Position"' in source
     assert 'addonRef.db.global.activeEditModule == "InterruptTracker"' in source
     assert '"Enable Party Sync"' in source
-    assert '"Show Preview When Solo"' in source
     assert '"Show Header"' in source
     assert '"Play Ready Sound"' in source
     assert '"Ready Sound"' in source

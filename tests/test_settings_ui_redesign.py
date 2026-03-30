@@ -97,6 +97,7 @@ def test_bloodlust_page_keeps_reference_sections_and_actions():
 def test_tracker_pages_keep_environment_and_behavior_controls():
     interrupt = read("Modules/InterruptTracker.lua")
     crowd_control = read("Modules/CrowdControlTracker.lua")
+    raid_defensive = read("Modules/DefensiveRaidTracker.lua")
 
     for source in (interrupt, crowd_control):
         assert "Show in Dungeons" in source
@@ -113,6 +114,9 @@ def test_tracker_pages_keep_environment_and_behavior_controls():
 
     assert "Play Ready Sound" in interrupt
     assert "Filter Mode" in crowd_control
+    assert "Show Preview When Solo" not in interrupt
+    assert "Show Preview When Solo" not in crowd_control
+    assert "Show Preview When Solo" not in raid_defensive
 
 
 def test_party_defensive_page_exposes_attachment_and_tooltip_controls():
