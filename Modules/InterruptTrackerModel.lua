@@ -1,4 +1,8 @@
 local Model = {}
+local SpellDB = assert(
+  _G.SunderingToolsCombatTrackSpellDB,
+  "SunderingToolsCombatTrackSpellDB must load before InterruptTrackerModel.lua"
+)
 
 local rolePriority = {
   TANK = 1,
@@ -25,58 +29,6 @@ local classColors = {
   DRUID = { 1, 0.49, 0.04 },
   DEMONHUNTER = { 0.64, 0.19, 0.79 },
   EVOKER = { 0.2, 0.58, 0.5 },
-}
-
-local interruptData = {
-  [250] = { spellID = 47528, cd = 12, role = "TANK" },
-  [251] = { spellID = 47528, cd = 12, role = "DAMAGER" },
-  [252] = { spellID = 47528, cd = 12, role = "DAMAGER" },
-  [577] = { spellID = 183752, cd = 15, role = "DAMAGER" },
-  [581] = { spellID = 183752, cd = 15, role = "TANK" },
-  [1480] = { spellID = 183752, cd = 15, role = "DAMAGER" },
-  [103] = { spellID = 106839, cd = 15, role = "DAMAGER" },
-  [104] = { spellID = 106839, cd = 15, role = "TANK" },
-  [1467] = { spellID = 351338, cd = 20, role = "DAMAGER" },
-  [1473] = { spellID = 351338, cd = 18, role = "DAMAGER" },
-  [253] = { spellID = 147362, cd = 24, role = "DAMAGER" },
-  [254] = { spellID = 147362, cd = 24, role = "DAMAGER" },
-  [255] = { spellID = 187707, cd = 15, role = "DAMAGER" },
-  [62] = { spellID = 2139, cd = 20, role = "DAMAGER" },
-  [63] = { spellID = 2139, cd = 20, role = "DAMAGER" },
-  [64] = { spellID = 2139, cd = 20, role = "DAMAGER" },
-  [268] = { spellID = 116705, cd = 15, role = "TANK" },
-  [269] = { spellID = 116705, cd = 15, role = "DAMAGER" },
-  [66] = { spellID = 96231, cd = 15, role = "TANK" },
-  [70] = { spellID = 96231, cd = 15, role = "DAMAGER" },
-  [258] = { spellID = 15487, cd = 30, role = "DAMAGER" },
-  [259] = { spellID = 1766, cd = 15, role = "DAMAGER" },
-  [260] = { spellID = 1766, cd = 15, role = "DAMAGER" },
-  [261] = { spellID = 1766, cd = 15, role = "DAMAGER" },
-  [262] = { spellID = 57994, cd = 12, role = "DAMAGER" },
-  [263] = { spellID = 57994, cd = 12, role = "DAMAGER" },
-  [264] = { spellID = 57994, cd = 30, role = "HEALER" },
-  [265] = { spellID = 19647, cd = 24, role = "DAMAGER" },
-  [266] = { spellID = 19647, cd = 30, role = "DAMAGER" },
-  [267] = { spellID = 19647, cd = 24, role = "DAMAGER" },
-  [71] = { spellID = 6552, cd = 15, role = "DAMAGER" },
-  [72] = { spellID = 6552, cd = 15, role = "DAMAGER" },
-  [73] = { spellID = 6552, cd = 15, role = "TANK" },
-}
-
-local fallbackSpecByClass = {
-  DEATHKNIGHT = 250,
-  DEMONHUNTER = 577,
-  DRUID = 103,
-  EVOKER = 1467,
-  HUNTER = 253,
-  MAGE = 62,
-  MONK = 268,
-  PALADIN = 66,
-  PRIEST = 258,
-  ROGUE = 259,
-  SHAMAN = 262,
-  WARLOCK = 265,
-  WARRIOR = 71,
 }
 
 local function IsReady(bar, now)
@@ -121,16 +73,7 @@ function Model.SortBars(bars, now)
 end
 
 function Model.GetInterruptData(specID, classToken)
-  if specID and interruptData[specID] then
-    return interruptData[specID], specID
-  end
-
-  local fallbackSpecID = classToken and fallbackSpecByClass[classToken]
-  if fallbackSpecID then
-    return interruptData[fallbackSpecID], fallbackSpecID
-  end
-
-  return nil, 0
+  return SpellDB.ResolveInterrupt(specID, classToken)
 end
 
 function Model.GetClassColor(classToken)
@@ -142,13 +85,7 @@ function Model.GetDefaultPosition()
 end
 
 function Model.FormatTimerText(remaining)
-  if remaining > 6 then
-    local displayValue = math.floor(remaining)
-    return string.format("%d", displayValue), displayValue
-  end
-
-  local displayValue = math.floor(remaining * 10)
-  return string.format("%.1f", remaining), displayValue
+  return string.format("%.0fs", remaining), math.floor(remaining + 0.5)
 end
 
 function Model.BuildPreviewBars()

@@ -8,16 +8,59 @@ local Model = assert(
     _G.SunderingToolsInterruptTrackerModel,
     "SunderingToolsInterruptTrackerModel must load before InterruptTracker.lua"
 )
+local SpellDB = assert(
+    _G.SunderingToolsCombatTrackSpellDB,
+    "SunderingToolsCombatTrackSpellDB must load before InterruptTracker.lua"
+)
+local Sync = assert(
+    _G.SunderingToolsCombatTrackSync,
+    "SunderingToolsCombatTrackSync must load before InterruptTracker.lua"
+)
+local Engine = assert(
+    _G.SunderingToolsCombatTrackEngine,
+    "SunderingToolsCombatTrackEngine must load before InterruptTracker.lua"
+)
+local FramePositioning = assert(
+    _G.SunderingToolsFramePositioning,
+    "SunderingToolsFramePositioning must load before InterruptTracker.lua"
+)
+local TrackerFrame = assert(
+    _G.SunderingToolsTrackerFrame,
+    "SunderingToolsTrackerFrame must load before InterruptTracker.lua"
+)
+local LSM = LibStub and LibStub("LibSharedMedia-3.0", true)
 local defaultPosX, defaultPosY = Model.GetDefaultPosition()
+local HEADER_LABEL = "Interrupts"
+local HEADER_TEXTURE = "Interface\\Icons\\Ability_Kick"
+local READY_SOUND_DEFAULT = "Interface\\AddOns\\SunderingTools\\sounds\\ready.mp3"
+local READY_SOUND_ALT = "Interface\\AddOns\\SunderingTools\\sounds\\ready2.mp3"
+local READY_SOUND_OPTIONS = {
+    { label = "SunderingTools: Ready 1", value = READY_SOUND_DEFAULT },
+    { label = "SunderingTools: Ready 2", value = READY_SOUND_ALT },
+}
+local READY_SOUND_CHANNELS = {
+    "Master",
+    "SFX",
+    "Music",
+    "Ambience",
+    "Dialog",
+}
+local READY_SOUND_VALID_CHANNELS = {}
+
+for _, channel in ipairs(READY_SOUND_CHANNELS) do
+    READY_SOUND_VALID_CHANNELS[channel] = true
+end
 
 local module = {
     key = "InterruptTracker",
     label = "Interrupt Tracker",
+    description = "Track interrupts, sync party data, and adjust layout.",
     order = 10,
     defaults = {
         enabled = true,
         posX = defaultPosX,
         posY = defaultPosY,
+        positionMode = "CENTER_OFFSET",
         previewWhenSolo = true,
         maxBars = 5,
         growDirection = "DOWN",
@@ -26,19 +69,22 @@ local module = {
         barWidth = 175,
         barHeight = 18,
         fontSize = 11,
+        syncEnabled = true,
+        showHeader = true,
+        showInDungeon = true,
+        showInRaid = true,
+        showInWorld = true,
+        showInArena = true,
+        hideOutOfCombat = false,
+        showReady = true,
+        tooltipOnHover = true,
+        readySoundEnabled = false,
+        readySoundPath = READY_SOUND_DEFAULT,
+        readySoundChannel = "Master",
     },
 }
 
 local db = addon.db and addon.db.InterruptTracker
-
--- Event tracking system (ExWind-style)
-local pendingEvents = {
-    casts = {},      -- [unit] = { time = timestamp }
-    interrupts = {}, -- [unit] = { time = timestamp }
-    auras = {},      -- [unit] = { time = timestamp }
-}
-local TIME_WINDOW = 0.100 -- 100ms window for matching events
-local processingScheduled = false
 
 -- Local variables
 local bars = {}
@@ -47,12 +93,47 @@ local usedBarsList = {} -- Ordered list for layout
 local container = nil
 local interruptStats = {} -- [guid] = count
 local cooldownState = {} -- [guid] = startTime
+local trackerTicker = nil
+local spellTextureCache = {}
 local editModePreview = false
 local CreateContainer
 local EnsureBarPool
+local ConfigureBarPool
 local ReLayout
 local UpdatePartyData
 local UpdateBarVisuals
+local StartCooldownTicker
+local RegisterPartyWatchers
+local RegisterEnemyWatchers
+
+local runtime = {
+    engine = Engine.New(),
+    partyWatchFrames = {},
+    partyPetWatchFrames = {},
+    nameplateWatchFrames = {},
+    lastSelfInterruptTime = 0,
+    lastHelloAt = 0,
+    lastCorrName = nil,
+    lastCorrTime = 0,
+    partyUsers = {},
+    noInterruptPlayers = {},
+    recentPartyCasts = {},
+}
+
+local function GetCachedSpellTexture(spellID)
+    if not spellID then
+        return "Interface\\Icons\\INV_Misc_QuestionMark"
+    end
+
+    if not spellTextureCache[spellID] then
+        spellTextureCache[spellID] =
+            (C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(spellID))
+            or (GetSpellTexture and GetSpellTexture(spellID))
+            or "Interface\\Icons\\INV_Misc_QuestionMark"
+    end
+
+    return spellTextureCache[spellID]
+end
 
 local function ShouldShowPreview()
     if not db or not db.enabled then
@@ -63,7 +144,28 @@ local function ShouldShowPreview()
         return true
     end
 
-    return db.previewWhenSolo and (not IsInGroup() or IsInRaid())
+    return db.previewWhenSolo and not IsInGroup() and not IsInRaid() and not next(runtime.partyUsers)
+end
+
+local function IsCurrentInstanceAllowed()
+    if not db or not db.enabled then
+        return false
+    end
+
+    local _, instanceType = GetInstanceInfo()
+    if instanceType == "party" then
+        return db.showInDungeon ~= false
+    elseif instanceType == "raid" then
+        return db.showInRaid ~= false
+    elseif instanceType == "arena" then
+        return db.showInArena ~= false
+    end
+
+    return db.showInWorld ~= false
+end
+
+local function ShouldHideForCombat()
+    return db and db.hideOutOfCombat and not editModePreview and not InCombatLockdown()
 end
 
 local function HasVisibleBars()
@@ -78,7 +180,14 @@ local function UpdateContainerVisibility()
         return
     end
 
-    if editModePreview or HasVisibleBars() then
+    if not editModePreview and not ShouldShowPreview() then
+        if not IsCurrentInstanceAllowed() or ShouldHideForCombat() then
+            container:Hide()
+            return
+        end
+    end
+
+    if editModePreview or ShouldShowPreview() or HasVisibleBars() then
         container:Show()
     else
         container:Hide()
@@ -88,7 +197,7 @@ end
 local function UpdateEditLabelVisibility(enabled)
     if not container or not container.editLabel then return end
 
-    if enabled and not HasVisibleBars() then
+    if enabled then
         container.editLabel:Show()
     else
         container.editLabel:Hide()
@@ -110,6 +219,121 @@ local function GetIconOffset()
     return math.min(db.iconSize, db.barHeight) + 2
 end
 
+local function GetHeaderHeight()
+    if not db or db.showHeader == false then
+        return 0
+    end
+
+    return 18
+end
+
+local function NormalizeReadySoundChannel(channel)
+    if type(channel) ~= "string" then
+        return "Master"
+    end
+
+    channel = channel:match("^%s*(.-)%s*$")
+    if channel == "" then
+        return "Master"
+    end
+
+    if READY_SOUND_VALID_CHANNELS[channel] then
+        return channel
+    end
+
+    return "Master"
+end
+
+local function BuildReadySoundOptions()
+    local options = {}
+    local seenValues = {}
+
+    for _, option in ipairs(READY_SOUND_OPTIONS) do
+        options[#options + 1] = option
+        seenValues[option.value] = true
+    end
+
+    local sharedMedia = LibStub and LibStub("LibSharedMedia-3.0", true)
+    if sharedMedia and sharedMedia.HashTable then
+        local soundTable = sharedMedia:HashTable("sound")
+        local orderedLabels = {}
+
+        for label in pairs(soundTable or {}) do
+            orderedLabels[#orderedLabels + 1] = label
+        end
+
+        table.sort(orderedLabels)
+
+        for _, label in ipairs(orderedLabels) do
+            local soundPath = soundTable[label]
+            if type(soundPath) == "string" and soundPath ~= "" and not seenValues[soundPath] then
+                options[#options + 1] = {
+                    label = label,
+                    value = soundPath,
+                }
+                seenValues[soundPath] = true
+            end
+        end
+    end
+
+    return options
+end
+
+local function PlayReadySound(soundPath, channel)
+    if type(soundPath) ~= "string" or soundPath == "" then
+        return
+    end
+
+    PlaySoundFile(soundPath, NormalizeReadySoundChannel(channel))
+end
+
+function module:GetReadySoundOptions()
+    return BuildReadySoundOptions()
+end
+
+local function RefreshHeaderLayout()
+    if not container or not container.header or not db then
+        return
+    end
+
+    local headerHeight = GetHeaderHeight()
+    if headerHeight <= 0 then
+        container.header:Hide()
+        return
+    end
+
+    local headerWidth = math.max(96, math.min(db.barWidth, 132))
+    container.header:ClearAllPoints()
+    container.header:SetPoint("BOTTOMLEFT", container, "TOPLEFT", 0, 4)
+    container.header:SetSize(headerWidth, headerHeight)
+
+    container.header.bg:SetAllPoints()
+    container.header.bg:SetColorTexture(0.14, 0.12, 0.24, 0.88)
+
+    container.header.borderTop:SetPoint("TOPLEFT", container.header, "TOPLEFT", 0, 0)
+    container.header.borderTop:SetPoint("TOPRIGHT", container.header, "TOPRIGHT", 0, 0)
+    container.header.borderTop:SetHeight(1)
+    container.header.borderTop:SetColorTexture(0.35, 0.31, 0.52, 0.9)
+
+    container.header.borderBottom:SetPoint("BOTTOMLEFT", container.header, "BOTTOMLEFT", 0, 0)
+    container.header.borderBottom:SetPoint("BOTTOMRIGHT", container.header, "BOTTOMRIGHT", 0, 0)
+    container.header.borderBottom:SetHeight(1)
+    container.header.borderBottom:SetColorTexture(0, 0, 0, 0.9)
+
+    container.header.icon:SetSize(headerHeight - 4, headerHeight - 4)
+    container.header.icon:SetPoint("LEFT", container.header, "LEFT", 2, 0)
+    container.header.icon:SetTexture((C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(6552)) or HEADER_TEXTURE)
+
+    container.header.title:ClearAllPoints()
+    container.header.title:SetPoint("LEFT", container.header.icon, "RIGHT", 4, 0)
+    container.header.title:SetPoint("RIGHT", container.header, "RIGHT", -6, 0)
+    container.header.title:SetText(HEADER_LABEL)
+    container.header.title:SetTextColor(1.0, 0.84, 0.22)
+    container.header.title:SetFont("Fonts\\FRIZQT__.TTF", math.max(10, db.fontSize), "OUTLINE")
+
+    container.header:Show()
+end
+
 -- Get unit's spec ID (placeholder - would need LibGroupInSpecT for real implementation)
 local function GetUnitSpecID(unit)
     if unit == "player" then
@@ -120,42 +344,581 @@ local function GetUnitSpecID(unit)
     return 0
 end
 
--- Get unit's interrupt data
+local function AfterDelay(delay, callback)
+    if C_Timer and C_Timer.After then
+        C_Timer.After(delay, callback)
+    else
+        callback()
+    end
+end
+
+local function ResolveUnitRole(unit)
+    if unit == "player" and GetSpecialization and GetSpecializationInfo then
+        local specIndex = GetSpecialization()
+        if specIndex then
+            local _, _, _, _, role = GetSpecializationInfo(specIndex)
+            if role and role ~= "" then
+                return role
+            end
+        end
+    end
+
+    return UnitGroupRolesAssigned(unit)
+end
+
 local function GetUnitInterruptData(unit)
-    if not unit then return nil end
+    if not unit or not UnitExists(unit) then
+        return nil, 0, "MISSING_UNIT"
+    end
+
     local specID = GetUnitSpecID(unit)
-    local _, class = UnitClass(unit)
-    return Model.GetInterruptData(specID, class)
+    local _, classToken = UnitClass(unit)
+    local role = ResolveUnitRole(unit)
+    local powerType = UnitPowerType and UnitPowerType(unit) or nil
+    return SpellDB.ResolveAutoInterruptByContext(specID, classToken, role, powerType)
+end
+
+local function GetRuntimeUnits()
+    local units = {"player"}
+    if IsInRaid() then
+        for i = 1, GetNumGroupMembers() do
+            local unit = "raid" .. i
+            if not (UnitIsUnit and UnitIsUnit(unit, "player")) then
+                units[#units + 1] = "raid" .. i
+            end
+        end
+        return units
+    end
+
+    for i = 1, 4 do
+        units[#units + 1] = "party" .. i
+    end
+
+    return units
+end
+
+local function BuildRuntimeUnitsForDisplay()
+    local units = {"player"}
+    if IsInRaid() then
+        for i = 1, GetNumGroupMembers() do
+            local unit = "raid" .. i
+            if not (UnitIsUnit and UnitIsUnit(unit, "player")) then
+                units[#units + 1] = "raid" .. i
+            end
+        end
+        return units
+    end
+
+    if IsInGroup() then
+        for i = 1, 4 do
+            units[#units + 1] = "party" .. i
+        end
+    end
+
+    return units
+end
+
+local function ShortName(name)
+    if not name or name == "" then
+        return nil
+    end
+
+    if Ambiguate then
+        local short = Ambiguate(name, "short")
+        if short and short ~= "" then
+            return short
+        end
+    end
+
+    return string.match(name, "^([^%-]+)") or name
+end
+
+local function GetUnitBySender(sender)
+    if not sender or sender == "" then
+        return nil
+    end
+
+    local senderShort = ShortName(sender)
+    for _, unit in ipairs(GetRuntimeUnits()) do
+        if UnitExists(unit) then
+            local unitName = UnitName(unit)
+            if unitName == sender or ShortName(unitName) == senderShort then
+                return unit
+            end
+        end
+    end
+
+    return nil
+end
+
+local function FindGroupUnitByShortName(shortName)
+    if not shortName then
+        return nil
+    end
+
+    for _, unit in ipairs(GetRuntimeUnits()) do
+        if UnitExists(unit) and ShortName(UnitName(unit)) == shortName then
+            return unit
+        end
+    end
+
+    return nil
+end
+
+local function GetEntryCooldown(entry)
+    if type(entry) ~= "table" then
+        return 0
+    end
+
+    return entry.baseCd or entry.cd or 0
+end
+
+local function BuildEntryKey(guid, spellID)
+    if not guid or not spellID then
+        return nil
+    end
+
+    return tostring(guid) .. ":" .. tostring(spellID)
+end
+
+local function RemovePartyUser(shortName)
+    if not shortName then
+        return
+    end
+
+    local existing = runtime.partyUsers[shortName]
+    runtime.partyUsers[shortName] = nil
+
+    if existing and existing.guid and existing.spellID then
+        runtime.engine:RemoveEntry(BuildEntryKey(existing.guid, existing.spellID))
+    end
+end
+
+local function RegisterRuntimeInterrupt(unit, spellID, cooldownOverride, options)
+    options = options or {}
+    if not unit or not UnitExists(unit) then
+        return nil
+    end
+
+    local guid = UnitGUID(unit)
+    local fullName = UnitName(unit)
+    local shortName = ShortName(fullName)
+    local _, classToken = UnitClass(unit)
+    if not guid or not classToken or not shortName then
+        return nil
+    end
+
+    local resolvedSpellID = spellID and SpellDB.ResolveTrackedSpellID(spellID) or nil
+    local trackedSpell = resolvedSpellID and SpellDB.GetTrackedSpell(resolvedSpellID) or nil
+    if trackedSpell and trackedSpell.kind ~= "INT" then
+        return nil
+    end
+
+    local resolvedInterrupt, resolvedSpecID, suppressReason = GetUnitInterruptData(unit)
+    if suppressReason == "HEALER_SUPPRESSED" and not trackedSpell then
+        runtime.noInterruptPlayers[shortName] = true
+        RemovePartyUser(shortName)
+        return nil
+    end
+
+    runtime.noInterruptPlayers[shortName] = nil
+
+    resolvedSpellID = resolvedSpellID or (resolvedInterrupt and resolvedInterrupt.spellID)
+    if not resolvedSpellID then
+        return nil
+    end
+
+    local resolvedSource = options.source or (options.auto and "auto" or "sync")
+    local role = ResolveUnitRole(unit)
+    local cooldown = cooldownOverride
+        or (resolvedInterrupt and resolvedInterrupt.spellID == resolvedSpellID and resolvedInterrupt.cd)
+        or (trackedSpell and trackedSpell.cd)
+        or 0
+    local startTime = options.startTime or 0
+    local readyAt = options.readyAt
+    if readyAt == nil and startTime > 0 and cooldown > 0 then
+        readyAt = startTime + cooldown
+    end
+    local spellInfo = SpellDB.GetTrackedSpell(resolvedSpellID) or resolvedInterrupt or {}
+    local user = runtime.partyUsers[shortName] or {}
+
+    user.guid = guid
+    user.unitToken = unit
+    user.name = shortName
+    user.class = classToken
+    user.role = role
+    user.spellID = resolvedSpellID
+    user.spellName = spellInfo.name or user.spellName or shortName
+    user.baseCd = cooldown
+    user.specID = resolvedSpecID or user.specID or 0
+    user._auto = options.auto == true
+    if readyAt ~= nil then
+        user.cdEnd = readyAt
+    else
+        user.cdEnd = user.cdEnd or 0
+    end
+
+    runtime.partyUsers[shortName] = user
+
+    local runtimeEntry = runtime.engine:UpsertEntry({
+        key = BuildEntryKey(guid, resolvedSpellID),
+        playerGUID = guid,
+        playerName = shortName,
+        classToken = classToken,
+        unitToken = unit,
+        spellID = resolvedSpellID,
+        kind = "INT",
+        role = role,
+        specID = resolvedSpecID or 0,
+        baseCd = cooldown,
+        cd = cooldown,
+        source = resolvedSource,
+        startTime = startTime,
+        readyAt = readyAt,
+    })
+
+    return runtimeEntry
+end
+
+local function RefreshRuntimePartyRegistration()
+    RegisterRuntimeInterrupt("player", nil, nil, {
+        auto = false,
+        source = "self",
+    })
+
+    if not IsInGroup() or IsInRaid() then
+        return
+    end
+
+    for i = 1, 4 do
+        local unit = "party" .. i
+        if UnitExists(unit) then
+            RegisterRuntimeInterrupt(unit, nil, nil, {
+                auto = true,
+                source = "auto",
+            })
+        end
+    end
+end
+
+local function UpdateEngineEntryTiming(runtimeKey, source, startTime, readyAt)
+    if not runtimeKey then
+        return
+    end
+
+    runtime.engine:UpsertEntry({
+        key = runtimeKey,
+        source = source,
+        startTime = startTime,
+        readyAt = readyAt,
+    })
+end
+
+local function BuildRuntimeBarEntries()
+    local entries = {}
+    local now = GetTime()
+
+    for _, unit in ipairs(BuildRuntimeUnitsForDisplay()) do
+        if UnitExists(unit) then
+            local shortName = ShortName(UnitName(unit))
+            local guid = UnitGUID(unit)
+            local user = shortName and runtime.partyUsers[shortName] or nil
+
+            if user and guid then
+                local startTime = 0
+                if (user.cdEnd or 0) > now and (user.baseCd or 0) > 0 then
+                    startTime = user.cdEnd - user.baseCd
+                end
+
+                if startTime <= 0 then
+                    startTime = cooldownState[guid] or 0
+                end
+
+                local ready = startTime <= 0 or (user.cdEnd or 0) <= now
+                if not (ready and db.showReady == false) then
+                    entries[#entries + 1] = {
+                        key = guid,
+                        runtimeKey = BuildEntryKey(guid, user.spellID),
+                        unit = unit,
+                        partyName = shortName,
+                        name = user.name or shortName,
+                        class = user.class,
+                        role = user.role,
+                        spellID = user.spellID,
+                        cd = user.baseCd,
+                        specID = user.specID,
+                        startTime = startTime,
+                        source = user._auto and "auto" or "sync",
+                    }
+                end
+            end
+        end
+    end
+
+    return entries
+end
+
+local function RecordInterruptStat(guid)
+    if guid then
+        interruptStats[guid] = (interruptStats[guid] or 0) + 1
+    end
+end
+
+local function ApplyRuntimeCooldownEntry(entry, countInterrupt)
+    if type(entry) ~= "table" or not entry.playerGUID then
+        return
+    end
+
+    local guid = entry.playerGUID
+    local shortName = ShortName(entry.playerName)
+    local startTime = entry.startTime or GetTime()
+    local cooldown = GetEntryCooldown(entry)
+    local readyAt = entry.readyAt
+    if readyAt == nil and cooldown > 0 then
+        readyAt = startTime + cooldown
+    end
+
+    if shortName and runtime.partyUsers[shortName] then
+        local user = runtime.partyUsers[shortName]
+        user.guid = guid
+        user.spellID = entry.spellID or user.spellID
+        user.baseCd = cooldown > 0 and cooldown or user.baseCd
+        user.class = entry.classToken or user.class
+        user.role = entry.role or user.role
+        user.specID = entry.specID or user.specID
+        user._auto = entry.source == "auto"
+        user.cdEnd = readyAt or 0
+    end
+
+    cooldownState[guid] = startTime
+    UpdateEngineEntryTiming(entry.key, entry.source, startTime, readyAt)
+
+    if countInterrupt then
+        RecordInterruptStat(guid)
+    end
+
+    local data = activeBars[guid]
+    if not data then
+        UpdatePartyData()
+        data = activeBars[guid]
+    end
+
+    if not data then
+        return
+    end
+
+    data.runtimeKey = entry.key
+    data.spellID = entry.spellID or data.spellID
+    data.cd = cooldown > 0 and cooldown or data.cd
+    data.startTime = startTime
+    data.source = entry.source or data.source
+    data.role = entry.role or data.role
+    data.class = entry.classToken or data.class
+    data.name = entry.playerName or data.name
+
+    local bar = data.bar
+    bar._trackerData = data
+    bar.cooldown:SetValue(0)
+    UpdateBarVisuals(bar, data)
+    StartCooldownTicker(bar, data)
+    ReLayout()
+end
+
+local function AnnouncePresence()
+    if not db or not db.enabled or db.syncEnabled == false or not IsInGroup() then
+        return
+    end
+
+    local _, classToken = UnitClass("player")
+    runtime.lastHelloAt = GetTime()
+    Sync.Send("HELLO", {
+        classToken = classToken or "UNKNOWN",
+    })
+end
+
+local function HandleSyncHelloMessage(payload, sender)
+    if not db or not db.enabled or db.syncEnabled == false then
+        return
+    end
+
+    local unit = GetUnitBySender(sender)
+    if not unit or unit == "player" then
+        return
+    end
+
+    local classToken = payload.classToken
+    if not classToken or classToken == "" then
+        _, classToken = UnitClass(unit)
+    end
+
+    RegisterRuntimeInterrupt(unit, nil, nil, {
+        auto = false,
+        source = "auto",
+    })
+
+    if runtime.lastHelloAt <= 0 or (GetTime() - runtime.lastHelloAt) > 5 then
+        AnnouncePresence()
+    end
+end
+
+local function HandleEnemyInterrupted()
+    local now = GetTime()
+    local bestName = nil
+    local bestDelta = 999
+    local staleNames = {}
+    local selfDelta = runtime.lastSelfInterruptTime > 0 and (now - runtime.lastSelfInterruptTime) or 999
+
+    for name, observedAt in pairs(runtime.recentPartyCasts) do
+        local delta = now - observedAt
+        if delta > 0.5 then
+            staleNames[#staleNames + 1] = name
+        elseif delta < bestDelta then
+            if bestName and (bestDelta - delta) < 0.05 then
+                local bestCdEnd = (runtime.partyUsers[bestName] and runtime.partyUsers[bestName].cdEnd) or 0
+                local contenderCdEnd = (runtime.partyUsers[name] and runtime.partyUsers[name].cdEnd) or 0
+                if contenderCdEnd > bestCdEnd then
+                    bestName = name
+                    bestDelta = delta
+                end
+            else
+                bestName = name
+                bestDelta = delta
+            end
+        end
+    end
+
+    for _, name in ipairs(staleNames) do
+        runtime.recentPartyCasts[name] = nil
+    end
+
+    if selfDelta < 0.5 and selfDelta <= bestDelta then
+        bestName = nil
+        bestDelta = selfDelta
+    end
+
+    if bestName and bestDelta < 0.5 then
+        runtime.recentPartyCasts[bestName] = nil
+        if runtime.lastCorrName == bestName and (now - runtime.lastCorrTime) < 0.2 then
+            return
+        end
+
+        runtime.lastCorrName = bestName
+        runtime.lastCorrTime = now
+
+        local user = runtime.partyUsers[bestName]
+        if not user then
+            local unit = FindGroupUnitByShortName(bestName)
+            if unit then
+                RegisterRuntimeInterrupt(unit, nil, nil, {
+                    auto = true,
+                    source = "auto",
+                })
+                user = runtime.partyUsers[bestName]
+            end
+        end
+
+        if user and user.guid and user.spellID and (user.baseCd or 0) > 0 then
+            local applied = runtime.engine:ApplyCorrelatedCast(user.guid, user.spellID, now, now + user.baseCd)
+            if applied then
+                applied.playerName = bestName
+                applied.classToken = user.class
+                applied.role = user.role
+                applied.specID = user.specID
+                ApplyRuntimeCooldownEntry(applied, true)
+            end
+        end
+    elseif selfDelta < 1.5 then
+        runtime.lastSelfInterruptTime = 0
+        UpdatePartyData()
+    end
+end
+
+local function CanRecordWatcherTimestamp(ownerUnit)
+    if not ownerUnit or not UnitExists(ownerUnit) or not UnitIsPlayer(ownerUnit) then
+        return false
+    end
+
+    local shortName = ShortName(UnitName(ownerUnit))
+    if not shortName or shortName == "" or runtime.noInterruptPlayers[shortName] then
+        return false
+    end
+
+    local info = runtime.partyUsers[shortName]
+    local kickOnCooldown = info and info.cdEnd and (info.cdEnd > GetTime() + 0.5)
+    if kickOnCooldown then
+        return false
+    end
+
+    if info then
+        return true
+    end
+
+    local resolvedInterrupt = GetUnitInterruptData(ownerUnit)
+    return resolvedInterrupt ~= nil
+end
+
+local function HandlePartyWatcher(ownerUnit)
+    if not db or not db.enabled or not ownerUnit or not UnitExists(ownerUnit) then
+        return
+    end
+
+    if not CanRecordWatcherTimestamp(ownerUnit) then
+        return
+    end
+
+    local shortName = ShortName(UnitName(ownerUnit))
+    if shortName and shortName ~= "" then
+        runtime.recentPartyCasts[shortName] = GetTime()
+    end
+end
+
+local function HandleSyncInterruptMessage(message, sender)
+    if not db or not db.enabled or db.syncEnabled == false then
+        return
+    end
+
+    local unit = GetUnitBySender(sender)
+    if not unit or unit == "player" then
+        return
+    end
+
+    local messageType, payload = Sync.Decode(message)
+    if messageType == "HELLO" then
+        HandleSyncHelloMessage(payload, sender)
+        return
+    end
+
+    if messageType ~= "INT" then
+        return
+    end
+
+    local spellID = payload.spellID or 0
+    local cooldown = payload.cd or 0
+    if spellID <= 0 or cooldown <= 0 then
+        return
+    end
+
+    local now = GetTime()
+    local registered = RegisterRuntimeInterrupt(unit, spellID, cooldown, {
+        auto = false,
+        source = "sync",
+        startTime = now,
+        readyAt = now + cooldown,
+    })
+    if not registered then
+        return
+    end
+
+    local applied = runtime.engine:ApplySyncCast(UnitGUID(unit), spellID, now, now + cooldown)
+    if applied then
+        applied.playerName = ShortName(UnitName(unit))
+        ApplyRuntimeCooldownEntry(applied, true)
+    end
 end
 
 local function UpdateAnchorVisuals(enabled)
     local anchor = module.anchor or container
-    if not anchor then return end
-
-    anchor:EnableMouse(enabled)
-    if anchor.dragHandle then
-        anchor.dragHandle:EnableMouse(enabled)
-        if enabled then
-            anchor.dragHandle:Show()
-        else
-            anchor.dragHandle:Hide()
-        end
-    end
-    if anchor.editBackdrop then
-        if enabled then
-            anchor.editBackdrop:Show()
-        else
-            anchor.editBackdrop:Hide()
-        end
-    end
-
-    if anchor.editLabel then
-        UpdateEditLabelVisibility(enabled)
-    end
-
-    if enabled then
-        anchor:Show()
-    end
+    TrackerFrame.UpdateEditModeVisuals(anchor, enabled, UpdateEditLabelVisibility)
 end
 
 function module:SetEditMode(enabled)
@@ -171,95 +934,187 @@ function module:ResetPosition(moduleDB)
     moduleDB = moduleDB or db or (addon.db and addon.db.modules and addon.db.modules.InterruptTracker)
     if not moduleDB then return end
 
-    moduleDB.posX, moduleDB.posY = Model.GetDefaultPosition()
-
-    local anchor = self.anchor or container
-    if anchor then
-        anchor:ClearAllPoints()
-        anchor:SetPoint("CENTER", UIParent, "CENTER", moduleDB.posX, moduleDB.posY)
-    end
+    FramePositioning.ResetToDefault(self.anchor or container, moduleDB, defaultPosX, defaultPosY)
 end
 
 function module:buildSettings(panel, helpers, addonRef, moduleDB)
     db = moduleDB
 
-    local introText = helpers:CreateText(
-        panel,
-        "OmniCD-style interrupt bars with live preview in Edit Mode.",
-        "GameFontHighlight",
-        320
-    )
-    introText:SetPoint("TOPLEFT", 0, 0)
+    local function GetEditButtonLabel()
+        if addonRef.db.global.editMode and (
+            addonRef.db.global.activeEditModule == "InterruptTracker"
+            or addonRef.db.global.activeEditModule == "ALL"
+        ) then
+            return "Lock Tracker"
+        end
 
-    local enabledBox = helpers:CreateCheckbox(panel, "Enable Interrupt Tracker", moduleDB.enabled, function(value)
+        return "Open Edit Mode"
+    end
+
+    local stateLabel = helpers:CreateDividerLabel(panel, "State", nil, 0)
+    local stateBody = helpers:CreateSectionHint(panel, "Enable the tracker and place it where you want it.", 520)
+    stateBody:SetPoint("TOPLEFT", stateLabel, "BOTTOMLEFT", 0, -8)
+
+    local enabledBox = helpers:CreateInlineCheckbox(panel, "Enable Interrupt Tracker", moduleDB.enabled, function(value)
         addonRef:SetModuleValue("InterruptTracker", "enabled", value)
     end)
-    enabledBox:SetPoint("TOPLEFT", introText, "BOTTOMLEFT", 0, -16)
+    enabledBox:SetPoint("TOPLEFT", stateBody, "BOTTOMLEFT", 0, -12)
 
-    local editButton = helpers:CreateButton(panel, "Open Edit Mode", function()
-        addonRef:SetEditMode(true)
+    local editButton = helpers:CreateActionButton(panel, GetEditButtonLabel(), function(self)
+        local isActive = addonRef.db.global.editMode and (
+            addonRef.db.global.activeEditModule == "InterruptTracker"
+            or addonRef.db.global.activeEditModule == "ALL"
+        )
+        addonRef:SetEditMode(not isActive, isActive and nil or "InterruptTracker")
+        self:SetText(GetEditButtonLabel())
+        addonRef:RefreshSettings()
     end)
-    editButton:SetPoint("TOPLEFT", enabledBox, "BOTTOMLEFT", 4, -12)
 
-    local resetButton = helpers:CreateButton(panel, "Reset Position", function()
+    local resetButton = helpers:CreateActionButton(panel, "Reset Position", function()
         module:ResetPosition(moduleDB)
     end)
-    resetButton:SetPoint("TOPLEFT", editButton, "TOPRIGHT", 12, 0)
+    helpers:PlaceRow(enabledBox, editButton, resetButton, -12, 12)
 
-    local maxBarsSlider = helpers:CreateSlider(panel, "Maximum Bars", 1, 8, 1, moduleDB.maxBars, function(value)
-        addonRef:SetModuleValue("InterruptTracker", "maxBars", value)
-    end, 180)
-    maxBarsSlider:SetPoint("TOPLEFT", editButton, "BOTTOMLEFT", 0, -20)
+    local stateHint = helpers:CreateSectionHint(panel, "Edit mode lets you move this tracker.", 420)
+    stateHint:SetPoint("TOPLEFT", editButton, "BOTTOMLEFT", 0, -12)
 
-    local growDirectionDropdown = helpers:CreateDropdown(
-        panel,
+    local behaviorColumn, layoutColumn = helpers:CreateSectionColumns(panel, stateHint, -24)
+
+    local behaviorLabel = helpers:CreateDividerLabel(behaviorColumn, "Behavior", nil, 0)
+    local behaviorBody = helpers:CreateSectionHint(behaviorColumn, "Preview, visibility, sync, and ready sound options.", 250)
+    behaviorBody:SetPoint("TOPLEFT", behaviorLabel, "BOTTOMLEFT", 0, -8)
+
+    local previewWhenSoloBox = helpers:CreateInlineCheckbox(behaviorColumn, "Show Preview When Solo", moduleDB.previewWhenSolo, function(value)
+        addonRef:SetModuleValue("InterruptTracker", "previewWhenSolo", value)
+    end)
+    previewWhenSoloBox:SetPoint("TOPLEFT", behaviorBody, "BOTTOMLEFT", 0, -12)
+
+    local syncEnabledBox = helpers:CreateInlineCheckbox(behaviorColumn, "Enable Party Sync", moduleDB.syncEnabled, function(value)
+        addonRef:SetModuleValue("InterruptTracker", "syncEnabled", value)
+    end)
+    syncEnabledBox:SetPoint("TOPLEFT", previewWhenSoloBox, "BOTTOMLEFT", 0, -8)
+
+    local showReadyBox = helpers:CreateInlineCheckbox(behaviorColumn, "Show Ready Bars", moduleDB.showReady ~= false, function(value)
+        addonRef:SetModuleValue("InterruptTracker", "showReady", value)
+    end)
+    showReadyBox:SetPoint("TOPLEFT", syncEnabledBox, "BOTTOMLEFT", 0, -8)
+
+    local hideOutOfCombatBox = helpers:CreateInlineCheckbox(behaviorColumn, "Hide Out of Combat", moduleDB.hideOutOfCombat, function(value)
+        addonRef:SetModuleValue("InterruptTracker", "hideOutOfCombat", value)
+    end)
+    hideOutOfCombatBox:SetPoint("TOPLEFT", showReadyBox, "BOTTOMLEFT", 0, -8)
+
+    local tooltipBox = helpers:CreateInlineCheckbox(behaviorColumn, "Tooltip on Hover", moduleDB.tooltipOnHover ~= false, function(value)
+        addonRef:SetModuleValue("InterruptTracker", "tooltipOnHover", value)
+    end)
+    tooltipBox:SetPoint("TOPLEFT", hideOutOfCombatBox, "BOTTOMLEFT", 0, -8)
+
+    local showInDungeonBox = helpers:CreateInlineCheckbox(behaviorColumn, "Show in Dungeons", moduleDB.showInDungeon ~= false, function(value)
+        addonRef:SetModuleValue("InterruptTracker", "showInDungeon", value)
+    end)
+    showInDungeonBox:SetPoint("TOPLEFT", tooltipBox, "BOTTOMLEFT", 0, -8)
+
+    local showInRaidBox = helpers:CreateInlineCheckbox(behaviorColumn, "Show in Raids", moduleDB.showInRaid ~= false, function(value)
+        addonRef:SetModuleValue("InterruptTracker", "showInRaid", value)
+    end)
+    showInRaidBox:SetPoint("TOPLEFT", showInDungeonBox, "BOTTOMLEFT", 0, -8)
+
+    local showInWorldBox = helpers:CreateInlineCheckbox(behaviorColumn, "Show in World", moduleDB.showInWorld ~= false, function(value)
+        addonRef:SetModuleValue("InterruptTracker", "showInWorld", value)
+    end)
+    showInWorldBox:SetPoint("TOPLEFT", showInRaidBox, "BOTTOMLEFT", 0, -8)
+
+    local showInArenaBox = helpers:CreateInlineCheckbox(behaviorColumn, "Show in Arena", moduleDB.showInArena ~= false, function(value)
+        addonRef:SetModuleValue("InterruptTracker", "showInArena", value)
+    end)
+    showInArenaBox:SetPoint("TOPLEFT", showInWorldBox, "BOTTOMLEFT", 0, -8)
+
+    local behaviorHint = helpers:CreateSectionHint(
+        behaviorColumn,
+        "Shares tracked casts with party members using the addon.",
+        250
+    )
+    behaviorHint:SetPoint("TOPLEFT", showInArenaBox, "BOTTOMLEFT", 0, -12)
+
+    local readySoundBox = helpers:CreateInlineCheckbox(behaviorColumn, "Play Ready Sound", moduleDB.readySoundEnabled, function(value)
+        addonRef:SetModuleValue("InterruptTracker", "readySoundEnabled", value)
+    end)
+    readySoundBox:SetPoint("TOPLEFT", behaviorHint, "BOTTOMLEFT", 0, -14)
+
+    local readySoundDropdown = helpers:CreateLabeledDropdown(
+        behaviorColumn,
+        "Ready Sound",
+        module:GetReadySoundOptions(),
+        moduleDB.readySoundPath,
+        210,
+        function(value)
+            addonRef:SetModuleValue("InterruptTracker", "readySoundPath", value)
+        end
+    )
+    readySoundDropdown:SetPoint("TOPLEFT", readySoundBox, "BOTTOMLEFT", 0, -10)
+
+    local readySoundChannelDropdown = helpers:CreateLabeledDropdown(
+        behaviorColumn,
+        "Sound Channel",
+        READY_SOUND_CHANNELS,
+        NormalizeReadySoundChannel(moduleDB.readySoundChannel),
+        210,
+        function(value)
+            addonRef:SetModuleValue("InterruptTracker", "readySoundChannel", value)
+        end
+    )
+    readySoundChannelDropdown:SetPoint("TOPLEFT", readySoundDropdown, "BOTTOMLEFT", 0, -10)
+
+    local layoutLabel = helpers:CreateDividerLabel(layoutColumn, "Layout", nil, 0)
+    local layoutBody = helpers:CreateSectionHint(layoutColumn, "Adjust size, spacing, and growth.", 250)
+    layoutBody:SetPoint("TOPLEFT", layoutLabel, "BOTTOMLEFT", 0, -8)
+
+    local showHeaderBox = helpers:CreateInlineCheckbox(layoutColumn, "Show Header", moduleDB.showHeader ~= false, function(value)
+        addonRef:SetModuleValue("InterruptTracker", "showHeader", value)
+    end)
+    showHeaderBox:SetPoint("TOPLEFT", layoutBody, "BOTTOMLEFT", 0, -12)
+
+    local growDirectionDropdown = helpers:CreateLabeledDropdown(
+        layoutColumn,
         "Grow Direction",
         { "DOWN", "UP" },
         moduleDB.growDirection,
-        140,
+        210,
         function(value)
             addonRef:SetModuleValue("InterruptTracker", "growDirection", value)
         end
     )
-    growDirectionDropdown:SetPoint("TOPLEFT", maxBarsSlider, "BOTTOMLEFT", -4, -10)
+    growDirectionDropdown:SetPoint("TOPLEFT", showHeaderBox, "BOTTOMLEFT", 0, -10)
 
-    local spacingSlider = helpers:CreateSlider(panel, "Bar Spacing", 0, 12, 1, moduleDB.spacing, function(value)
+    local maxBarsSlider = helpers:CreateLabeledSlider(layoutColumn, "Maximum Bars", 1, 8, 1, moduleDB.maxBars, function(value)
+        addonRef:SetModuleValue("InterruptTracker", "maxBars", value)
+    end, 250)
+    maxBarsSlider:SetPoint("TOPLEFT", growDirectionDropdown, "BOTTOMLEFT", 0, -10)
+
+    local spacingSlider = helpers:CreateLabeledSlider(layoutColumn, "Bar Spacing", 0, 12, 1, moduleDB.spacing, function(value)
         addonRef:SetModuleValue("InterruptTracker", "spacing", value)
-    end, 180)
-    spacingSlider:SetPoint("TOPLEFT", growDirectionDropdown, "BOTTOMLEFT", 4, -10)
+    end, 250)
+    spacingSlider:SetPoint("TOPLEFT", maxBarsSlider, "BOTTOMLEFT", 0, -10)
 
-    local barWidthSlider = helpers:CreateSlider(panel, "Bar Width", 100, 320, 5, moduleDB.barWidth, function(value)
+    local barWidthSlider = helpers:CreateLabeledSlider(layoutColumn, "Bar Width", 100, 320, 5, moduleDB.barWidth, function(value)
         addonRef:SetModuleValue("InterruptTracker", "barWidth", value)
-    end, 180)
+    end, 250)
     barWidthSlider:SetPoint("TOPLEFT", spacingSlider, "BOTTOMLEFT", 0, -10)
 
-    local barHeightSlider = helpers:CreateSlider(panel, "Bar Height", 16, 40, 1, moduleDB.barHeight, function(value)
+    local barHeightSlider = helpers:CreateLabeledSlider(layoutColumn, "Bar Height", 16, 40, 1, moduleDB.barHeight, function(value)
         addonRef:SetModuleValue("InterruptTracker", "barHeight", value)
-    end, 180)
+    end, 250)
     barHeightSlider:SetPoint("TOPLEFT", barWidthSlider, "BOTTOMLEFT", 0, -10)
 
-    local iconSizeSlider = helpers:CreateSlider(panel, "Icon Size", 14, 32, 1, moduleDB.iconSize, function(value)
+    local iconSizeSlider = helpers:CreateLabeledSlider(layoutColumn, "Icon Size", 14, 32, 1, moduleDB.iconSize, function(value)
         addonRef:SetModuleValue("InterruptTracker", "iconSize", value)
-    end, 180)
+    end, 250)
     iconSizeSlider:SetPoint("TOPLEFT", barHeightSlider, "BOTTOMLEFT", 0, -10)
 
-    local fontSizeSlider = helpers:CreateSlider(panel, "Font Size", 8, 18, 1, moduleDB.fontSize, function(value)
+    local fontSizeSlider = helpers:CreateLabeledSlider(layoutColumn, "Font Size", 8, 18, 1, moduleDB.fontSize, function(value)
         addonRef:SetModuleValue("InterruptTracker", "fontSize", value)
-    end, 180)
+    end, 250)
     fontSizeSlider:SetPoint("TOPLEFT", iconSizeSlider, "BOTTOMLEFT", 0, -10)
-
-    local previewWhenSoloBox = helpers:CreateCheckbox(panel, "Show Preview When Solo", moduleDB.previewWhenSolo, function(value)
-        addonRef:SetModuleValue("InterruptTracker", "previewWhenSolo", value)
-    end)
-    previewWhenSoloBox:SetPoint("TOPLEFT", maxBarsSlider, "TOPRIGHT", 24, -2)
-
-    local helpText = helpers:CreateText(
-        panel,
-        "Open Edit Mode to move the tracker. Ready bars stay class-colored, and the timer only appears while a kick is recharging.",
-        "GameFontHighlight",
-        340
-    )
-    helpText:SetPoint("TOPLEFT", fontSizeSlider, "BOTTOMLEFT", 0, -14)
 end
 
 function module:onConfigChanged(addonRef, moduleDB, key)
@@ -277,11 +1132,7 @@ function module:onConfigChanged(addonRef, moduleDB, key)
     end
 
     if key == "posX" or key == "posY" then
-        local anchor = self.anchor or container
-        if anchor then
-            anchor:ClearAllPoints()
-            anchor:SetPoint("CENTER", UIParent, "CENTER", moduleDB.posX, moduleDB.posY)
-        end
+        FramePositioning.ApplySavedPosition(self.anchor or container, moduleDB, defaultPosX, defaultPosY)
         return
     end
 
@@ -301,7 +1152,19 @@ function module:onConfigChanged(addonRef, moduleDB, key)
         or key == "barHeight"
         or key == "iconSize"
         or key == "fontSize"
-        or key == "previewWhenSolo" then
+        or key == "showHeader"
+        or key == "previewWhenSolo"
+        or key == "showInDungeon"
+        or key == "showInRaid"
+        or key == "showInWorld"
+        or key == "showInArena"
+        or key == "hideOutOfCombat"
+        or key == "showReady"
+        or key == "tooltipOnHover"
+        or key == "syncEnabled"
+        or key == "readySoundEnabled"
+        or key == "readySoundPath"
+        or key == "readySoundChannel" then
         CreateContainer()
         UpdatePartyData()
     end
@@ -345,6 +1208,31 @@ local function CreateBar(index)
     bar.cooldownText:SetJustifyH("RIGHT")
     bar.cooldownText:SetJustifyV("MIDDLE")
     bar.timerText = bar.cooldownText
+
+    bar:EnableMouse(true)
+    bar:SetScript("OnEnter", function(self)
+        if not db or db.tooltipOnHover == false then return end
+        local data = self._trackerData
+        if not data then return end
+
+        local trackedSpell = SpellDB.GetTrackedSpell(data.spellID)
+        local now = GetTime()
+        local ready = data.startTime == 0 or (now - data.startTime) >= (data.cd or 0)
+        GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
+        GameTooltip:ClearLines()
+        GameTooltip:AddLine(data.partyName or data.name or "Unknown", 1, 1, 1)
+        if trackedSpell and trackedSpell.name then
+            GameTooltip:AddLine(trackedSpell.name, 1, 1, 1)
+        end
+        if ready then
+            GameTooltip:AddLine("Status: Ready", 0.2, 0.95, 0.3)
+        else
+            local remaining = math.max(0, (data.cd or 0) - (now - data.startTime))
+            GameTooltip:AddLine(string.format("Cooldown: %.0fs", remaining), 0.95, 0.6, 0.15)
+        end
+        GameTooltip:Show()
+    end)
+    bar:SetScript("OnLeave", function() GameTooltip:Hide() end)
 
     bar:Hide()
     return bar
@@ -424,6 +1312,7 @@ local function RefreshContainerGeometry()
     local visibleCount = math.max(1, math.min(db.maxBars, #usedBarsList))
     local totalHeight = (visibleCount * db.barHeight) + (math.max(0, visibleCount - 1) * db.spacing)
     container:SetSize(db.barWidth, math.max(db.barHeight, totalHeight))
+    RefreshHeaderLayout()
 end
 
 local function EnsureBarPool()
@@ -433,7 +1322,6 @@ local function EnsureBarPool()
         if not bars[index] then
             bars[index] = CreateBar(index)
         end
-        ConfigureBar(bars[index])
     end
 
     for index = db.maxBars + 1, #bars do
@@ -441,12 +1329,23 @@ local function EnsureBarPool()
             bars[index]:Hide()
         end
     end
+end
+
+ConfigureBarPool = function()
+    if not container or not db then return end
+
+    EnsureBarPool()
+    for index = 1, db.maxBars do
+        if bars[index] then
+            ConfigureBar(bars[index])
+        end
+    end
 
     RefreshContainerGeometry()
 end
 
 -- Update bar visuals
-local function UpdateBarVisuals(bar, data)
+UpdateBarVisuals = function(bar, data)
     if not bar or not data then return end
 
     local now = GetTime()
@@ -468,9 +1367,7 @@ local function UpdateBarVisuals(bar, data)
         progress = math.max(0, math.min(1, 1 - (remaining / data.cd)))
     end
 
-    ConfigureBar(bar)
-
-    bar.icon:SetTexture(C_Spell.GetSpellTexture(data.spellID))
+    bar.icon:SetTexture(GetCachedSpellTexture(data.spellID))
     bar.icon:Show()
     bar.nameText:SetText(data.name or "")
     bar.cooldownNameText:SetText(data.name or "")
@@ -525,14 +1422,16 @@ local function SortBars()
 end
 
 -- Layout bars
-local function ReLayout()
+ReLayout = function()
     if not container then return end
 
     EnsureBarPool()
     SortBars()
+    RefreshContainerGeometry()
 
     local spacing = db.spacing
     local growUp = (db.growDirection == "UP")
+    local growKey = string.format("%s:%d:%d", db.growDirection or "DOWN", db.barHeight or 0, spacing or 0)
     local maxLimit = db.maxBars
 
     for i, data in ipairs(usedBarsList) do
@@ -545,8 +1444,12 @@ local function ReLayout()
                 yOffset = -yOffset
             end
 
-            bar:ClearAllPoints()
-            bar:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -yOffset)
+            if bar._lastLayoutIndex ~= i or bar._lastGrowKey ~= growKey then
+                bar:ClearAllPoints()
+                bar:SetPoint("TOPLEFT", container, "TOPLEFT", 0, -yOffset)
+                bar._lastLayoutIndex = i
+                bar._lastGrowKey = growKey
+            end
             bar:Show()
         end
     end
@@ -564,62 +1467,218 @@ end
 -- Create main container
 function CreateContainer()
     if container then
-        EnsureBarPool()
-        RefreshContainerGeometry()
+        FramePositioning.ApplySavedPosition(container, db, defaultPosX, defaultPosY)
+        ConfigureBarPool()
         return
     end
 
-    container = CreateFrame("Frame", "SunderingToolsInterruptTracker", UIParent)
+    container = TrackerFrame.CreateContainerShell(
+        "SunderingToolsInterruptTracker",
+        "Interrupt Tracker",
+        function()
+            container:StartMoving()
+        end,
+        function()
+            container:StopMovingOrSizing()
+            FramePositioning.SaveAbsolutePosition(container, db)
+        end
+    )
+    container.header = CreateFrame("Frame", nil, container)
+    container.header.bg = container.header:CreateTexture(nil, "BACKGROUND")
+    container.header.borderTop = container.header:CreateTexture(nil, "BORDER")
+    container.header.borderBottom = container.header:CreateTexture(nil, "BORDER")
+    container.header.icon = container.header:CreateTexture(nil, "ARTWORK")
+    container.header.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
+    container.header.title = container.header:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    container.header.title:SetJustifyH("CENTER")
+    container.header.title:SetJustifyV("MIDDLE")
     container:SetSize(db.barWidth, db.barHeight * db.maxBars)
-    container:SetPoint("CENTER", UIParent, "CENTER", db.posX, db.posY)
-    container:SetMovable(true)
-    container:EnableMouse(false)
-    container:RegisterForDrag("LeftButton")
+    FramePositioning.ApplySavedPosition(container, db, defaultPosX, defaultPosY)
 
-    container.dragHandle = CreateFrame("Frame", nil, container)
-    container.dragHandle:SetAllPoints()
-    container.dragHandle:SetFrameStrata("HIGH")
-    container.dragHandle:EnableMouse(false)
-    container.dragHandle:RegisterForDrag("LeftButton")
-    container.dragHandle:SetScript("OnDragStart", function()
-        container:StartMoving()
-    end)
-    container.dragHandle:SetScript("OnDragStop", function()
-        container:StopMovingOrSizing()
-        local _, _, _, x, y = container:GetPoint()
-        db.posX = x
-        db.posY = y
-    end)
-    container.dragHandle:Hide()
-
-    container.editBackdrop = container:CreateTexture(nil, "BACKGROUND")
-    container.editBackdrop:SetAllPoints()
-    container.editBackdrop:SetColorTexture(0.1, 0.5, 0.9, 0.18)
-    container.editBackdrop:Hide()
-
-    container.editLabel = container:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    container.editLabel:SetPoint("CENTER")
-    container.editLabel:SetText("Interrupt Tracker")
-    container.editLabel:Hide()
-
-    EnsureBarPool()
+    ConfigureBarPool()
+    RefreshHeaderLayout()
 
     module.anchor = container
     UpdateAnchorVisuals(addon.db and addon.db.global and addon.db.global.editMode)
 end
 
 local function ResetActiveBars()
+    if trackerTicker then
+        trackerTicker:Cancel()
+        trackerTicker = nil
+    end
+
     for _, data in pairs(activeBars) do
         if data.bar then
-            data.bar:SetScript("OnUpdate", nil)
+            data.bar._trackerData = nil
             data.bar._lastDisplayed = nil
-            data.bar._lastSortUpdate = nil
             data.bar:Hide()
         end
     end
 
     wipe(activeBars)
     wipe(usedBarsList)
+end
+
+local HandleCooldownReady
+
+local function RefreshActiveCooldownBars()
+    local anyCooling = false
+    local needsLayout = false
+    local needsRefresh = false
+
+    for _, data in pairs(activeBars) do
+        local bar = data.bar
+        if bar and (data.startTime or 0) > 0 and (data.cd or 0) > 0 then
+            local liveElapsed = GetTime() - data.startTime
+            local liveRemaining = data.cd - liveElapsed
+
+            if liveRemaining > 0 then
+                anyCooling = true
+                bar.cooldown:SetValue(liveElapsed / data.cd)
+
+                local text, displayVal = Model.FormatTimerText(liveRemaining)
+                if displayVal ~= bar._lastDisplayed then
+                    bar._lastDisplayed = displayVal
+                    bar.cooldownText:SetText(text)
+                end
+            else
+                if HandleCooldownReady and HandleCooldownReady(data, bar) then
+                    needsLayout = true
+                else
+                    needsRefresh = true
+                end
+            end
+        end
+    end
+
+    if needsRefresh then
+        UpdatePartyData()
+        return
+    end
+
+    if needsLayout then
+        ReLayout()
+    end
+
+    if not anyCooling and trackerTicker then
+        trackerTicker:Cancel()
+        trackerTicker = nil
+    end
+end
+
+local function StartTrackerTicker()
+    if trackerTicker or not (C_Timer and C_Timer.NewTicker) then
+        return
+    end
+
+    trackerTicker = C_Timer.NewTicker(1, function()
+        RefreshActiveCooldownBars()
+    end)
+end
+
+StartCooldownTicker = function(bar, data)
+    if not bar or not data then return end
+
+    local startTime = data.startTime or 0
+    local cdDuration = data.cd or 0
+    local elapsed = GetTime() - startTime
+    local remaining = cdDuration - elapsed
+
+    bar._lastDisplayed = nil
+
+    if startTime <= 0 or cdDuration <= 0 or remaining <= 0 then
+        data.startTime = 0
+        cooldownState[data.key] = nil
+        if data.partyName and runtime.partyUsers[data.partyName] then
+            runtime.partyUsers[data.partyName].cdEnd = 0
+        end
+        UpdateEngineEntryTiming(data.runtimeKey, data.source, 0, 0)
+        UpdateBarVisuals(bar, data)
+        return
+    end
+
+    bar.cooldown:SetValue(math.max(0, math.min(1, elapsed / cdDuration)))
+    local text, displayVal = Model.FormatTimerText(remaining)
+    bar._lastDisplayed = displayVal
+    UpdateBarVisuals(bar, data)
+    bar.cooldownText:SetText(text)
+    StartTrackerTicker()
+end
+
+HandleCooldownReady = function(data, bar)
+    if not data or not bar then
+        return false
+    end
+
+    bar.cooldown:SetValue(1)
+    data.startTime = 0
+    cooldownState[data.key] = nil
+    if data.partyName and runtime.partyUsers[data.partyName] then
+        runtime.partyUsers[data.partyName].cdEnd = 0
+    end
+    UpdateEngineEntryTiming(data.runtimeKey, data.source, 0, 0)
+    if data.unit == "player" and db.readySoundEnabled then
+        if not editModePreview then
+            PlayReadySound(db.readySoundPath, db.readySoundChannel)
+        end
+    end
+    if db.showReady == false then
+        bar._lastDisplayed = nil
+        return false
+    end
+
+    bar.cooldownText:SetText("")
+    bar._lastDisplayed = nil
+    UpdateBarVisuals(bar, data)
+    return true
+end
+
+local function ShouldDisplaySoloSelfBar()
+    if IsInGroup() or IsInRaid() then
+        return false
+    end
+
+    local playerName = ShortName(UnitName("player"))
+    return playerName and runtime.partyUsers[playerName] ~= nil
+end
+
+local function PruneRuntimeRoster()
+    local currentNames = {}
+    local playerName = ShortName(UnitName("player"))
+
+    if playerName and playerName ~= "" then
+        currentNames[playerName] = true
+    end
+
+    if IsInGroup() then
+        for _, unit in ipairs(GetRuntimeUnits()) do
+            if UnitExists(unit) then
+                local name = ShortName(UnitName(unit))
+                if name and name ~= "" then
+                    currentNames[name] = true
+                end
+            end
+        end
+    end
+
+    for name in pairs(runtime.partyUsers) do
+        if not currentNames[name] then
+            runtime.partyUsers[name] = nil
+        end
+    end
+
+    for name in pairs(runtime.noInterruptPlayers) do
+        if not currentNames[name] then
+            runtime.noInterruptPlayers[name] = nil
+        end
+    end
+
+    for name in pairs(runtime.recentPartyCasts) do
+        if not currentNames[name] then
+            runtime.recentPartyCasts[name] = nil
+        end
+    end
 end
 
 local function BuildPreviewBars()
@@ -660,8 +1719,10 @@ local function PopulateBars(entries)
         local bar = bars[barIndex]
         local barData = {
             key = entry.key,
+            runtimeKey = entry.runtimeKey,
             bar = bar,
             unit = entry.unit,
+            partyName = entry.partyName,
             name = entry.name,
             class = entry.class,
             role = entry.role,
@@ -671,10 +1732,16 @@ local function PopulateBars(entries)
             startTime = entry.startTime or 0,
             previewText = entry.previewText,
             previewValue = entry.previewValue,
+            source = entry.source,
         }
 
         activeBars[barData.key] = barData
+        bar._trackerData = barData
+        bar._lastDisplayed = nil
         UpdateBarVisuals(bar, barData)
+        if (barData.startTime or 0) > 0 then
+            StartCooldownTicker(bar, barData)
+        end
         barIndex = barIndex + 1
     end
 
@@ -692,197 +1759,198 @@ function UpdatePartyData()
         return
     end
 
-    if not IsInGroup() or IsInRaid() then
+    if not IsCurrentInstanceAllowed() or ShouldHideForCombat() then
         ResetActiveBars()
         ReLayout()
         return
     end
 
-    local units = {"player"}
-    for i = 1, 4 do
-        table.insert(units, "party" .. i)
+    if not IsInGroup() and not ShouldDisplaySoloSelfBar() then
+        ResetActiveBars()
+        ReLayout()
+        return
     end
 
-    local entries = {}
-    for _, unit in ipairs(units) do
-        if UnitExists(unit) and #entries < db.maxBars then
-            local guid = UnitGUID(unit)
-            local name = UnitName(unit)
-            local _, class = UnitClass(unit)
-            local interrupt, specID = GetUnitInterruptData(unit)
-
-            if interrupt and guid then
-                entries[#entries + 1] = {
-                    key = guid,
-                    unit = unit,
-                    name = name,
-                    class = class,
-                    role = interrupt.role,
-                    spellID = interrupt.spellID,
-                    cd = interrupt.cd,
-                    specID = specID,
-                    startTime = cooldownState[guid] or 0,
-                }
-            end
-        end
-    end
-
-    PopulateBars(entries)
+    PopulateBars(BuildRuntimeBarEntries())
 end
 
 -- Trigger cooldown
 local function TriggerCooldown(unit)
+    local runtimeEntry = RegisterRuntimeInterrupt(unit, nil, nil, {
+        auto = unit ~= "player",
+        source = unit == "player" and "self" or "auto",
+    })
+    if not runtimeEntry then
+        return
+    end
+
+    local cooldown = GetEntryCooldown(runtimeEntry)
+    if cooldown <= 0 then
+        return
+    end
+
     local guid = UnitGUID(unit)
-    if not guid or not activeBars[guid] then return end
+    if not guid then
+        return
+    end
 
-    local data = activeBars[guid]
-    local bar = data.bar
-    local cdDuration = data.cd
+    local now = GetTime()
+    local applied = runtime.engine:ApplyCorrelatedCast(guid, runtimeEntry.spellID, now, now + cooldown)
+    if applied then
+        ApplyRuntimeCooldownEntry(applied, true)
+    end
+end
 
-    -- Record stat
-    interruptStats[guid] = (interruptStats[guid] or 0) + 1
+for i = 1, 4 do
+    runtime.partyWatchFrames[i] = CreateFrame("Frame")
+    runtime.partyPetWatchFrames[i] = CreateFrame("Frame")
+end
 
-    -- Start cooldown
-    data.startTime = GetTime()
-    cooldownState[guid] = data.startTime
-    bar.cooldown:SetValue(0)
+RegisterPartyWatchers = function()
+    for i = 1, 4 do
+        local unit = "party" .. i
+        local petUnit = "partypet" .. i
+        local ownerUnit = unit
 
-    ReLayout()
+        runtime.partyWatchFrames[i]:UnregisterAllEvents()
+        runtime.partyPetWatchFrames[i]:UnregisterAllEvents()
 
-    bar:SetScript("OnUpdate", function(self)
-        local elapsed = GetTime() - data.startTime
-        local remaining = cdDuration - elapsed
-
-        if remaining > 0 then
-            self.cooldown:SetValue(elapsed / cdDuration)
-
-            local text, displayVal = Model.FormatTimerText(remaining)
-            if displayVal ~= self._lastDisplayed then
-                self._lastDisplayed = displayVal
-                self.cooldownText:SetText(text)
-            end
-
-            -- Resort every second while cooling
-            local lastUpdate = self._lastSortUpdate or 0
-            if elapsed - lastUpdate >= 1.0 then
-                self._lastSortUpdate = elapsed
-                ReLayout()
-            end
-        else
-            -- Cooldown finished
-            self.cooldown:SetValue(1)
-            cooldownState[guid] = nil
-            self.cooldownText:SetText("")
-            self._lastDisplayed = nil
-            self:SetScript("OnUpdate", nil)
-            ReLayout()
+        if UnitExists(unit) then
+            runtime.partyWatchFrames[i]:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", unit)
+            runtime.partyWatchFrames[i]:SetScript("OnEvent", function()
+                HandlePartyWatcher(unit)
+            end)
         end
+
+        if UnitExists(petUnit) then
+            runtime.partyPetWatchFrames[i]:RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", petUnit)
+            runtime.partyPetWatchFrames[i]:SetScript("OnEvent", function()
+                HandlePartyWatcher(ownerUnit)
+            end)
+        end
+    end
+end
+
+local enemyWatcherFrame = CreateFrame("Frame")
+
+RegisterEnemyWatchers = function()
+    enemyWatcherFrame:RegisterUnitEvent(
+        "UNIT_SPELLCAST_INTERRUPTED",
+        "target", "focus",
+        "boss1", "boss2", "boss3", "boss4", "boss5"
+    )
+    enemyWatcherFrame:SetScript("OnEvent", function()
+        HandleEnemyInterrupted()
     end)
+
+    for i = 1, 40 do
+        local npUnit = "nameplate" .. i
+        if not runtime.nameplateWatchFrames[npUnit] then
+            runtime.nameplateWatchFrames[npUnit] = CreateFrame("Frame")
+        end
+
+        runtime.nameplateWatchFrames[npUnit]:UnregisterAllEvents()
+        runtime.nameplateWatchFrames[npUnit]:RegisterUnitEvent("UNIT_SPELLCAST_INTERRUPTED", npUnit)
+        runtime.nameplateWatchFrames[npUnit]:SetScript("OnEvent", function()
+            HandleEnemyInterrupted()
+        end)
+    end
 end
 
--- Process pending events (ExWind-style matching)
-local function ProcessPendingEvents()
-    processingScheduled = false
-
-    local currentTime = GetTime()
-
-    -- Clean old aura records (> 50ms)
-    for unit, data in pairs(pendingEvents.auras) do
-        if currentTime - data.time > 0.05 then
-            pendingEvents.auras[unit] = nil
-        end
-    end
-
-    -- Check 1: Must have exactly one interrupt (multiple = CC)
-    local interruptCount = 0
-    local targetUnit = nil
-    for unit, _ in pairs(pendingEvents.interrupts) do
-        interruptCount = interruptCount + 1
-        targetUnit = unit
-    end
-
-    if interruptCount == 0 then
-        wipe(pendingEvents.interrupts)
-        wipe(pendingEvents.casts)
-        wipe(pendingEvents.auras)
-        return
-    end
-
-    -- Multiple interrupts = crowd control, ignore
-    if interruptCount > 1 then
-        wipe(pendingEvents.interrupts)
-        wipe(pendingEvents.casts)
-        wipe(pendingEvents.auras)
-        return
-    end
-
-    -- Check 2: Look for aura changes on the interrupted target (CC detection)
-    local interruptTime = pendingEvents.interrupts[targetUnit].time
-
-    if pendingEvents.auras[targetUnit] then
-        local auraTime = pendingEvents.auras[targetUnit].time
-        local auraDiff = math.abs(interruptTime - auraTime)
-
-        -- If aura changed within 30ms of interrupt, it's probably a CC
-        if auraDiff <= 0.030 then
-            wipe(pendingEvents.interrupts)
-            wipe(pendingEvents.casts)
-            wipe(pendingEvents.auras)
-            return
-        end
-    end
-
-    -- Check 3: Find the caster with closest timing
-    local caster = nil
-    local bestMatch = nil
-    local bestTimeDiff = math.huge
-
-    for unit, data in pairs(pendingEvents.casts) do
-        local timeDiff = math.abs(interruptTime - data.time)
-
-        if timeDiff <= TIME_WINDOW and timeDiff < bestTimeDiff then
-            bestMatch = unit
-            bestTimeDiff = timeDiff
-        end
-    end
-
-    caster = bestMatch
-
-    if caster then
-        TriggerCooldown(caster)
-    end
-
-    -- Clear event cache
-    wipe(pendingEvents.interrupts)
-    wipe(pendingEvents.casts)
-    wipe(pendingEvents.auras)
-end
-
--- Schedule event processing
-local function ScheduleProcessing()
-    if processingScheduled then return end
-    processingScheduled = true
-    C_Timer.After(0.03, ProcessPendingEvents)
-end
-
--- Event frame
 local eventFrame = CreateFrame("Frame")
 
 eventFrame:RegisterEvent("PLAYER_LOGIN")
+eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
+eventFrame:RegisterEvent("CHALLENGE_MODE_START")
 eventFrame:RegisterEvent("GROUP_ROSTER_UPDATE")
+eventFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
+eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 eventFrame:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
-eventFrame:RegisterEvent("UNIT_SPELLCAST_INTERRUPTED")
-eventFrame:RegisterEvent("UNIT_AURA")
+eventFrame:RegisterEvent("CHAT_MSG_ADDON")
 
 eventFrame:SetScript("OnEvent", function(self, event, ...)
     if event == "PLAYER_LOGIN" then
-        db = addon.db.InterruptTracker
-        if db.enabled then
+        db = addon.db and addon.db.InterruptTracker
+        Sync.RegisterPrefix()
+        RegisterEnemyWatchers()
+
+        if db and db.enabled then
             CreateContainer()
             UpdatePartyData()
         end
 
+    elseif event == "PLAYER_ENTERING_WORLD" then
+        wipe(runtime.partyUsers)
+        wipe(runtime.noInterruptPlayers)
+        wipe(runtime.recentPartyCasts)
+        wipe(cooldownState)
+        runtime.engine:Reset()
+        runtime.lastSelfInterruptTime = 0
+        runtime.lastCorrName = nil
+        runtime.lastCorrTime = 0
+        runtime.lastHelloAt = 0
+        addon:DebugLog("int", "reset runtime", "PLAYER_ENTERING_WORLD")
+
+        AfterDelay(0.3, function()
+            RegisterRuntimeInterrupt("player", nil, nil, {
+                auto = false,
+                source = "self",
+            })
+            if db and db.enabled then
+                UpdatePartyData()
+            end
+        end)
+        AfterDelay(0.5, function()
+            RegisterPartyWatchers()
+            RefreshRuntimePartyRegistration()
+        end)
+        AfterDelay(1.5, function()
+            if IsInGroup() then
+                AnnouncePresence()
+            end
+        end)
+
+    elseif event == "CHALLENGE_MODE_START" then
+        wipe(runtime.recentPartyCasts)
+        wipe(cooldownState)
+        runtime.engine:Reset()
+        runtime.lastHelloAt = 0
+        addon:DebugLog("int", "reset runtime", "CHALLENGE_MODE_START")
+        AfterDelay(0.5, function()
+            RegisterPartyWatchers()
+            RefreshRuntimePartyRegistration()
+        end)
+        AfterDelay(1.0, function()
+            if IsInGroup() then
+                AnnouncePresence()
+            end
+        end)
+        AfterDelay(4.0, function()
+            if IsInGroup() then
+                AnnouncePresence()
+            end
+        end)
+
     elseif event == "GROUP_ROSTER_UPDATE" then
+        addon:DebugLog("int", "group roster update")
+        PruneRuntimeRoster()
+        RegisterPartyWatchers()
+        RefreshRuntimePartyRegistration()
+        RegisterRuntimeInterrupt("player", nil, nil, {
+            auto = false,
+            source = "self",
+        })
+        AfterDelay(1.5, function()
+            if IsInGroup() then
+                AnnouncePresence()
+            end
+        end)
+
+        if db and db.enabled then
+            UpdatePartyData()
+        end
+
+    elseif event == "PLAYER_REGEN_DISABLED" or event == "PLAYER_REGEN_ENABLED" then
         if db and db.enabled then
             UpdatePartyData()
         end
@@ -890,43 +1958,63 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
     elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
         if not db or not db.enabled then return end
 
-        local unit, castGUID, spellID = ...
+        local unit, _, spellID = ...
+        if unit ~= "player" then return end
+        if type(spellID) ~= "number" then return end
+        local canonicalSpellID = SpellDB.ResolveTrackedSpellID(spellID)
+        local trackedSelfSpell = SpellDB.GetTrackedSpell(canonicalSpellID)
 
-        -- Only track player and party
-        if not (unit == "player" or string.find(unit, "party")) then return end
-
-        -- For player: direct detection by spellID
-        if unit == "player" then
-            local interruptData = GetUnitInterruptData("player")
-            if interruptData and interruptData.spellID == spellID then
-                TriggerCooldown("player")
+        local function ApplySelfInterrupt(registeredEntry)
+            if not registeredEntry or registeredEntry.spellID ~= canonicalSpellID then
+                return false
             end
+
+            local now = GetTime()
+            local cooldown = GetEntryCooldown(registeredEntry)
+            local applied = runtime.engine:ApplySelfCast(UnitGUID("player"), canonicalSpellID, now, now + cooldown)
+            runtime.lastSelfInterruptTime = now
+            if applied then
+                applied.playerName = ShortName(UnitName("player"))
+                applied.classToken = select(2, UnitClass("player"))
+                applied.unitToken = "player"
+                applied.role = registeredEntry.role or ResolveUnitRole("player")
+                applied.specID = registeredEntry.specID or 0
+                applied.baseCd = cooldown
+                applied.cd = cooldown
+                ApplyRuntimeCooldownEntry(applied, true)
+                addon:DebugLog("int", "self cast", canonicalSpellID, "cd", cooldown)
+                if db.syncEnabled ~= false then
+                    addon:DebugLog("int", "send sync", canonicalSpellID, "cd", cooldown)
+                    Sync.Send("INT", {
+                        spellID = canonicalSpellID,
+                        cd = cooldown,
+                    })
+                end
+            end
+
+            return true
+        end
+
+        local interruptEntry = RegisterRuntimeInterrupt("player", nil, nil, {
+            auto = false,
+            source = "self",
+        })
+        if not ApplySelfInterrupt(interruptEntry) and trackedSelfSpell and trackedSelfSpell.kind == "INT" then
+            local exactEntry = RegisterRuntimeInterrupt("player", canonicalSpellID, nil, {
+                auto = false,
+                source = "self",
+            })
+            ApplySelfInterrupt(exactEntry)
+        end
+
+    elseif event == "CHAT_MSG_ADDON" then
+        local prefix, message, _, sender = ...
+        if prefix ~= Sync.GetPrefix() then
             return
         end
 
-        -- For party: record cast event for time-window matching
-        pendingEvents.casts[unit] = { time = GetTime() }
-        ScheduleProcessing()
-
-    elseif event == "UNIT_SPELLCAST_INTERRUPTED" then
-        if not db or not db.enabled then return end
-
-        local unit = ...
-        -- Only track nameplate units (enemy casts)
-        if not string.find(unit, "nameplate") then return end
-
-        pendingEvents.interrupts[unit] = { time = GetTime() }
-        ScheduleProcessing()
-
-    elseif event == "UNIT_AURA" then
-        if not db or not db.enabled then return end
-
-        local unit = ...
-        -- Only track nameplate units
-        if not string.find(unit, "nameplate") then return end
-
-        pendingEvents.auras[unit] = { time = GetTime() }
-        ScheduleProcessing()
+        addon:DebugLog("int", "recv sync", sender or "?", message or "")
+        HandleSyncInterruptMessage(message, sender)
     end
 end)
 

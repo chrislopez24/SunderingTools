@@ -1,6 +1,7 @@
 # Local tooling
 .pytest_cache/
 __pycache__/
+.venv-lua/
 
 # Scratch and local brainstorming artifacts
 .superpowers/

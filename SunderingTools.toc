@@ -1,14 +1,21 @@
 ## Interface: 120000, 120001
-## Version: @project-version@
+## Version: 0.0.1
 ## Title: SunderingTools
-## Notes: Lightweight interrupt tracker and bloodlust sound
-## Author: ExWind
+## Notes: Lightweight cool tools
+## Author: Krich
 ## SavedVariables: SunderingToolsDB
 
 # Core
 Core\Config.lua
 Core\Registry.lua
 Core\SettingsModel.lua
+Core\CombatTrackSpellDB.lua
+Core\CombatTrackSync.lua
+Core\CombatTrackEngine.lua
+Core\FramePositioning.lua
+Core\TrackerFrame.lua
+
+# Shell
 SunderingTools.lua
 Settings.lua
 MinimapButton.lua
@@ -16,5 +23,7 @@ MinimapButton.lua
 # Modules
 Modules\InterruptTrackerModel.lua
 Modules\InterruptTracker.lua
+Modules\CrowdControlTrackerModel.lua
+Modules\CrowdControlTracker.lua
 Modules\BloodlustSoundModel.lua
 Modules\BloodlustSound.lua

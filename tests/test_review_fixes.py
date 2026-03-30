@@ -27,21 +27,44 @@ def test_minimap_launcher_is_native_only():
 def test_general_panel_includes_help_and_reset_all():
     source = read("Settings.lua")
     assert "Reset All Settings" in source
-    assert "/su opens settings." in source
-    assert "/su config opens settings directly." in source
-    assert "/su reset reloads with defaults." in source
-    assert 'button:SetText(addon.db.global.editMode and "Lock Tracker" or "Open Edit Mode")' in source
+    assert "Show Minimap Icon" in source
+    assert "Debug Mode" in source
+    assert "Unlock Minimap Drag" in source
+    assert "Lock Minimap Drag" in source
+    assert "Reset Minimap Position" in source
+    assert "Lock All Trackers" in source
+    assert "Edit Mode Active" in source
+    assert 'CreateTextBlock(content, "General"' not in source
+    assert "/su opens settings." not in source
+    assert "GetGlobalEditModeLabel(addon)" in source
     assert "addon:SetEditMode(not addon.db.global.editMode)" in source
     assert "addon:SetEditMode(false)" in source
     assert 'frame:SetMovable(true)' in source
-    assert 'frame:RegisterForDrag("LeftButton")' in source
-    assert 'frame:SetScript("OnDragStart", frame.StartMoving)' in source
-    assert 'frame:SetScript("OnDragStop", function(self)' in source
+    assert 'frame.headerBar:RegisterForDrag("LeftButton")' in source
+    assert 'frame.headerBar:SetScript("OnDragStart", function()' in source
+    assert 'frame.headerBar:SetScript("OnDragStop", function()' in source
+
+
+def test_general_panel_edit_mode_button_avoids_initializer_scope_bug():
+    source = read("Settings.lua")
+    assert 'button:SetScript("OnClick", function(self)' in source
+    assert 'local button = helpers:CreateButton(content, "", function(self)' not in source
+
+
+def test_settings_helpers_include_edit_box_for_bloodlust_sound():
+    settings = read("Settings.lua")
+    bloodlust = read("Modules/BloodlustSound.lua")
+    assert 'function Helpers:CreateEditBox(parent, label, width, value, onChange)' in settings
+    assert 'function Helpers:CreateLabeledEditBox(parent, label, width, value, onChange)' in settings
+    assert 'helpers:CreateLabeledEditBox(panel, "Sound File", helpers.WideControlWidth, moduleDB.soundFile or "", function(value)' in bloodlust
 
 
 def test_interrupt_tracker_panel_exposes_technical_controls():
     source = read("Modules/InterruptTracker.lua")
     for label in (
+        "State",
+        "Behavior",
+        "Layout",
         "Maximum Bars",
         "Grow Direction",
         "Bar Spacing",
@@ -50,19 +73,22 @@ def test_interrupt_tracker_panel_exposes_technical_controls():
         "Icon Size",
         "Font Size",
         "Show Preview When Solo",
+        "Enable Party Sync",
     ):
         assert label in source
     assert 'addonRef:SetModuleValue("InterruptTracker", "previewWhenSolo", value)' in source
     assert 'addonRef:SetModuleValue("InterruptTracker", "iconSize", value)' in source
     assert 'addonRef:SetModuleValue("InterruptTracker", "fontSize", value)' in source
+    assert 'addonRef.db.global.activeEditModule == "InterruptTracker"' in source
     assert "local function UsesClassColor(moduleDB)" in source
     assert "if UsesClassColor(db) and data.class then" in source
     assert "local editModePreview = false" in source
     assert "local function ShouldShowPreview()" in source
     assert "if editModePreview then" in source
-    assert "container.dragHandle = CreateFrame(\"Frame\", nil, container)" in source
-    assert "container.dragHandle:SetAllPoints()" in source
-    assert "container.dragHandle:RegisterForDrag(\"LeftButton\")" in source
+    assert "_G.SunderingToolsTrackerFrame" in source
+    assert "TrackerFrame.CreateContainerShell" in source
+    assert "TrackerFrame.UpdateEditModeVisuals" in source
+    assert "FramePositioning.SaveAbsolutePosition(container, db)" in source
     assert "bar.borderTop" in source
     assert "bar.borderBottom" in source
     assert "bar.borderRight" in source
@@ -94,6 +120,70 @@ def test_bloodlust_sound_uses_exhaustion_aura_instead_of_spellcast_success():
     assert "local lastSeenExpirationTime" in source
     assert "local function CheckFreshExhaustion()" in source
     assert "if hasFreshExhaustion then" in source
+
+
+def test_bloodlust_sound_supports_icon_style_dropdown_and_custom_path():
+    source = read("Modules/BloodlustSound.lua")
+    assert 'iconStyle = "BL_ICON"' in source
+    assert 'customIconPath = ""' in source
+    assert '"BL Icon Style"' in source
+    assert '"BL Icon"' in source
+    assert '"Pedro"' in source
+    assert '"Custom"' in source
+    assert '"Custom Icon Path"' in source
+    assert "assets\\\\art\\\\pedro.tga" in source
+    assert "if moduleDB.iconStyle == \"CUSTOM\" then" in source
+    assert "addonRef:RefreshSettings()" in source
+
+
+def test_bloodlust_sound_animates_pedro_sprite_sheet():
+    source = read("Modules/BloodlustSound.lua")
+    assert "local PEDRO_ATLAS_COLS = 4" in source
+    assert "local PEDRO_ATLAS_ROWS = 8" in source
+    assert "local PEDRO_USED_WIDTH = 770" in source
+    assert "local PEDRO_USED_HEIGHT = 1536" in source
+    assert "local PEDRO_FRAME_COUNT = 32" in source
+    assert "local PEDRO_FPS = 6" in source
+    assert "frame.icon:SetTexCoord(" in source
+    assert 'if (db and db.iconStyle or "BL_ICON") == "PEDRO" then' in source
+    assert "frame.bg = frame:CreateTexture" not in source
+
+
+def test_crowd_control_and_sundering_shell_use_consistent_setting_state_labels():
+    cc_source = read("Modules/CrowdControlTracker.lua")
+    shell_source = read("SunderingTools.lua")
+
+    for label in (
+        "State",
+        "Behavior",
+        "Layout",
+        "Enable Party Sync",
+        "M+ Essentials",
+        "All CC",
+    ):
+        assert label in cc_source
+
+    assert 'addonRef.db.global.activeEditModule == "CrowdControlTracker"' in cc_source
+    assert "activeEditModule = nil" in shell_source
+    assert "self.db.global.activeEditModule = self.db.global.editMode and activeKey or nil" in shell_source
+    assert "Track crowd control, choose the filter, and adjust layout." in cc_source
+
+
+def test_general_edit_mode_uses_global_all_state_and_bloodlust_supports_shared_edit_flow():
+    shell_source = read("SunderingTools.lua")
+    settings_source = read("Settings.lua")
+    bloodlust_source = read("Modules/BloodlustSound.lua")
+
+    assert 'activeKey = moduleKey or "ALL"' in shell_source
+    assert "Interrupt Tracker" in settings_source
+    assert "Crowd Control Tracker" in settings_source
+    assert "Bloodlust Sound" in settings_source
+    assert "function module:SetEditMode(enabled)" in bloodlust_source
+    assert "frame.editLabel" in bloodlust_source
+    assert "frame:SetMouseClickEnabled(false)" not in bloodlust_source
+    assert "Sound alerts, icon behavior, and placement." in bloodlust_source
+    assert 'helpers:CreateDividerLabel(panel, "State"' in bloodlust_source
+    assert 'helpers:CreateActionButton(panel, GetEditButtonLabel()' in bloodlust_source
 
 
 def test_runtime_files_do_not_use_dofile_and_models_load_from_toc():

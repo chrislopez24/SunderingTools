@@ -2,7 +2,7 @@ local SettingsModel = _G.SunderingToolsSettingsModel or {}
 
 function SettingsModel.BuildSections(modules)
   local sections = {
-    { key = "General", label = "General", kind = "general" },
+    { key = "General", label = "General", description = "Core addon controls.", kind = "general" },
   }
 
   local orderedModules = {}
@@ -25,6 +25,7 @@ function SettingsModel.BuildSections(modules)
     sections[#sections + 1] = {
       key = moduleDef.key,
       label = moduleDef.label,
+      description = moduleDef.description or moduleDef.label,
       kind = "module",
     }
   end
