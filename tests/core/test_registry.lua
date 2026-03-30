@@ -14,7 +14,7 @@ assert(db.modules.InterruptTracker.enabled == true, "module defaults should merg
 assert(db.modules.InterruptTracker.maxBars == 5, "missing module keys should merge")
 
 local registry = Registry.New()
-registry:Register({ key = "BloodlustSound", order = 20, label = "Bloodlust Sound" })
+registry:Register({ key = "BloodlustSound", order = 20, label = "Bloodlust Tracker" })
 registry:Register({ key = "InterruptTracker", order = 10, label = "Interrupt Tracker" })
 
 local ordered = registry:List()

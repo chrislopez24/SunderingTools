@@ -19,7 +19,7 @@ local TrackerFrame = assert(
 
 local module = {
   key = "BloodlustSound",
-  label = "Bloodlust Sound",
+  label = "Bloodlust Tracker",
   description = "Sound alerts, icon behavior, and placement.",
   order = 20,
   defaults = {
@@ -424,7 +424,7 @@ local function EnsureFrame()
 
   frame = TrackerFrame.CreateContainerShell(
     "SunderingToolsBloodlustFrame",
-    "Bloodlust Sound"
+    "Bloodlust Tracker"
   )
   RefreshFrameLayout()
 
@@ -471,7 +471,7 @@ local function EnsureFrame()
   if frame.editLabel then
     frame.editLabel:ClearAllPoints()
     frame.editLabel:SetPoint("TOP", 0, -8)
-    frame.editLabel:SetText("Bloodlust Sound")
+    frame.editLabel:SetText("Bloodlust Tracker")
   end
 
   UpdateAnchorVisuals(editModeEnabled)
@@ -682,7 +682,7 @@ function module:buildSettings(panel, helpers, addonRef, moduleDB)
   local stateBody = helpers:CreateSectionHint(panel, "Enable the alert and place the icon if you use it.", 520)
   stateBody:SetPoint("TOPLEFT", stateLabel, "BOTTOMLEFT", 0, -8)
 
-  local enabledBox = helpers:CreateInlineCheckbox(panel, "Enable Bloodlust Sound", moduleDB.enabled, function(value)
+  local enabledBox = helpers:CreateInlineCheckbox(panel, "Enable Bloodlust Tracker", moduleDB.enabled, function(value)
     addonRef:SetModuleValue("BloodlustSound", "enabled", value)
   end)
   enabledBox:SetPoint("TOPLEFT", stateBody, "BOTTOMLEFT", 0, -12)

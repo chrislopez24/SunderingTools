@@ -451,7 +451,7 @@ local function GetEditModeStatusText(addonRef)
 
   local active = addonRef.db.global.activeEditModule
   if active == "ALL" then
-    return "Interrupt Tracker, Crowd Control Tracker, and Bloodlust Sound can be moved now."
+    return "Interrupt Tracker, Crowd Control Tracker, and Bloodlust Tracker can be moved now."
   end
 
   local moduleDef = addonRef.modules and addonRef.modules[active]

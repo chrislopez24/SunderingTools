@@ -188,7 +188,7 @@ def test_general_edit_mode_uses_global_all_state_and_bloodlust_supports_shared_e
     assert 'activeKey = moduleKey or "ALL"' in shell_source
     assert "Interrupt Tracker" in settings_source
     assert "Crowd Control Tracker" in settings_source
-    assert "Bloodlust Sound" in settings_source
+    assert "Bloodlust Tracker" in settings_source
     assert "function module:SetEditMode(enabled)" in bloodlust_source
     assert "frame.editLabel" in bloodlust_source
     assert "frame:SetMouseClickEnabled(false)" not in bloodlust_source

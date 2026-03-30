@@ -1,7 +1,7 @@
 local SettingsModel = dofile("Core/SettingsModel.lua")
 
 local sections = SettingsModel.BuildSections({
-  { key = "BloodlustSound", label = "Bloodlust Sound", description = "Sound alerts, icon behavior, and placement.", order = 20 },
+  { key = "BloodlustSound", label = "Bloodlust Tracker", description = "Sound alerts, icon behavior, and placement.", order = 20 },
   { key = "InterruptTracker", label = "Interrupt Tracker", description = "Track interrupts, sync party data, and adjust layout.", order = 10 },
 })
 
