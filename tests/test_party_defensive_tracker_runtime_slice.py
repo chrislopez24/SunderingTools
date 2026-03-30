@@ -71,6 +71,15 @@ def test_party_defensive_tracker_gates_sync_broadcasts_and_filters_inbound_sende
     assert "GetOrCreatePartyUser(userKey" in source
 
 
+def test_party_defensive_tracker_supports_strict_sync_mode_and_remaining_payloads():
+    source = read("Modules/PartyDefensiveTracker.lua")
+
+    assert "strictSyncMode = false" in source
+    assert "local function IsStrictSyncMode()" in source
+    assert "payload.remaining" in source
+    assert 'remaining = trackedSpell.cd' in source
+
+
 def test_party_defensive_tracker_retries_late_compact_party_frame_attachment():
     source = read("Modules/PartyDefensiveTracker.lua")
 

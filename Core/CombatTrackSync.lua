@@ -73,6 +73,13 @@ function Sync.Encode(messageType, payload)
     }, ":")
   end
 
+  if messageType == "INT_MANIFEST" or messageType == "CC_MANIFEST" then
+    return table.concat({
+      messageType,
+      encodeSpellList(payload.spells),
+    }, ":")
+  end
+
   if messageType == "DEF_STATE" then
     return table.concat({
       "DEF_STATE",
@@ -80,7 +87,16 @@ function Sync.Encode(messageType, payload)
       tostring(payload.kind or ""),
       tostring(payload.cd or 0),
       tostring(payload.charges or 0),
-      tostring(payload.readyAt or 0),
+      tostring(payload.remaining or 0),
+    }, ":")
+  end
+
+  if payload.remaining ~= nil then
+    return table.concat({
+      messageType or "",
+      tostring(payload.spellID or 0),
+      tostring(payload.cd or 0),
+      tostring(payload.remaining or 0),
     }, ":")
   end
 
@@ -120,22 +136,36 @@ function Sync.Decode(message)
     }
   end
 
+  if messageType == "INT_MANIFEST" or messageType == "CC_MANIFEST" then
+    return messageType, {
+      spells = decodeSpellList(parts[2]),
+    }
+  end
+
   if messageType == "DEF_STATE" then
     local kind = parts[3]
     local cdIndex = 4
     local chargesIndex = 5
-    local readyAtIndex = 6
+    local timingIndex = 6
+    local remaining = nil
+    local readyAt = nil
 
     if #parts == 5 then
       kind = nil
       cdIndex = 3
       chargesIndex = 4
-      readyAtIndex = 5
+      timingIndex = 5
     elseif kind == nil or kind == "" then
       kind = nil
       cdIndex = 3
       chargesIndex = 4
-      readyAtIndex = 5
+      timingIndex = 5
+    else
+      remaining = tonumber(parts[timingIndex]) or 0
+    end
+
+    if kind == nil then
+      readyAt = tonumber(parts[timingIndex]) or 0
     end
 
     return messageType, {
@@ -143,13 +173,15 @@ function Sync.Decode(message)
       kind = kind,
       cd = tonumber(parts[cdIndex]) or 0,
       charges = tonumber(parts[chargesIndex]) or 0,
-      readyAt = tonumber(parts[readyAtIndex]) or 0,
+      remaining = remaining,
+      readyAt = readyAt,
     }
   end
 
   return messageType, {
     spellID = tonumber(parts[2]) or 0,
     cd = tonumber(parts[3]) or 0,
+    remaining = tonumber(parts[4]),
   }
 end
 

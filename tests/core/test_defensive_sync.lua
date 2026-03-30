@@ -24,9 +24,9 @@ local encodedState = Sync.Encode("DEF_STATE", {
   kind = "DEF",
   cd = 60,
   charges = 1,
-  readyAt = 123.5,
+  remaining = 17.25,
 })
-assert(encodedState == "DEF_STATE:48707:DEF:60:1:123.5", "defensive state payloads should encode kind, cooldown, charges, and readyAt")
+assert(encodedState == "DEF_STATE:48707:DEF:60:1:17.25", "defensive state payloads should encode kind, cooldown, charges, and remaining time")
 
 local stateType, statePayload = Sync.Decode(encodedState)
 assert(stateType == "DEF_STATE", "state message type should round-trip")
@@ -34,7 +34,8 @@ assert(statePayload.spellID == 48707, "state payload should preserve spell ID")
 assert(statePayload.kind == "DEF", "state payload should preserve kind")
 assert(statePayload.cd == 60, "state payload should preserve cooldown")
 assert(statePayload.charges == 1, "state payload should preserve charges")
-assert(statePayload.readyAt == 123.5, "state payload should preserve readyAt")
+assert(statePayload.remaining == 17.25, "state payload should preserve remaining")
+assert(statePayload.readyAt == nil or statePayload.readyAt == 0, "state payload should not invent readyAt for strict timing payloads")
 
 local legacyStateType, legacyStatePayload = Sync.Decode("DEF_STATE:48707:60:1:123.5")
 assert(legacyStateType == "DEF_STATE", "legacy defensive state should still decode as DEF_STATE")
@@ -63,7 +64,7 @@ assert(syncEntry.source == "sync", "defensive sync state should use sync priorit
 assert(syncEntry.kind == "DEF", "defensive sync state should preserve kind")
 assert(syncEntry.cd == 60, "defensive sync state should preserve cooldown")
 assert(syncEntry.charges == 1, "defensive sync state should preserve charges")
-assert(syncEntry.readyAt == 123.5, "defensive sync state should preserve readyAt")
+assert(syncEntry.readyAt == nil, "remaining-only sync state should not set readyAt without an observed time")
 
 local updatedSyncEntry = engine:ApplySyncState("dk-guid", 48707, {
   kind = "DEF",
@@ -75,6 +76,16 @@ assert(updatedSyncEntry.baseCd == 75, "defensive sync state should update the st
 
 local derivedSyncCast = engine:ApplySyncCast("dk-guid", 48707, 200, nil)
 assert(derivedSyncCast.readyAt == 275, "later sync timing should derive from the synced cooldown instead of stale catalog data")
+
+local rebuiltSyncEntry = engine:ApplySyncState("dk-guid", 48707, {
+  kind = "DEF",
+  cd = 75,
+  charges = 1,
+  remaining = 20,
+  observedAt = 300,
+})
+assert(rebuiltSyncEntry.startTime == 245, "remaining-based sync state should rebuild startTime from observedAt and cooldown")
+assert(rebuiltSyncEntry.readyAt == 320, "remaining-based sync state should rebuild readyAt from observedAt")
 
 local malformedStateType, malformedStatePayload = Sync.Decode("DEF_STATE:48707:DEF:not-a-number:2:0")
 assert(malformedStateType == "DEF_STATE", "malformed defensive state should still decode as DEF_STATE")

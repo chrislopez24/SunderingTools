@@ -26,6 +26,7 @@ local module = {
   defaults = {
     enabled = true,
     syncEnabled = true,
+    strictSyncMode = false,
     previewWhenSolo = true,
     maxIcons = 4,
     iconSize = 20,
@@ -318,6 +319,24 @@ local function BuildSpellSet(spellIDs)
     spellSet[spellID] = true
   end
   return spellSet
+end
+
+local function GetEntryRemaining(entry, now)
+  if type(entry) ~= "table" then
+    return 0
+  end
+
+  now = now or GetTime()
+  local readyAt = entry.readyAt or 0
+  if type(readyAt) ~= "number" or readyAt <= 0 then
+    return 0
+  end
+
+  return math.max(0, readyAt - now)
+end
+
+local function IsStrictSyncMode()
+  return db and db.strictSyncMode == true
 end
 
 local function ShouldShowPreview()
@@ -645,12 +664,19 @@ end
 UpdateAttachments = function()
   local moduleDB = EnsureModuleDB()
   if not moduleDB then
+    HideUnusedAttachments({})
     RefreshAttachmentTicker()
     return
   end
 
   local partyFrame = CompactPartyFrame
   if not partyFrame or type(partyFrame.memberUnitFrames) ~= "table" then
+    RefreshAttachmentTicker()
+    return
+  end
+
+  if not IsAttachmentActive() then
+    HideUnusedAttachments({})
     RefreshAttachmentTicker()
     return
   end
@@ -940,13 +966,16 @@ local function SendCurrentSelfState()
 
   for _, entry in ipairs(runtime.engine:GetEntriesByKind("DEF")) do
     if entry.playerGUID == playerGUID then
-      Sync.Send("DEF_STATE", {
-        spellID = entry.spellID,
-        kind = "DEF",
-        cd = entry.baseCd or entry.cd or 0,
-        charges = entry.charges or 1,
-        readyAt = entry.readyAt or 0,
-      })
+      local remaining = GetEntryRemaining(entry)
+      if remaining > 0 then
+        Sync.Send("DEF_STATE", {
+          spellID = entry.spellID,
+          kind = "DEF",
+          cd = entry.baseCd or entry.cd or 0,
+          charges = entry.charges or 1,
+          remaining = remaining,
+        })
+      end
     end
   end
 end
@@ -1001,6 +1030,7 @@ local function HandleSyncHelloMessage(payload, sender)
     user.specID = payload.specID
   end
 
+  SendCurrentSelfState()
   UpdateAttachments()
 end
 
@@ -1039,7 +1069,10 @@ local function HandleSyncDefensiveStateMessage(payload, sender)
   if not user.classToken then
     user.classToken = trackedSpell.classToken
   end
-  if not next(user.spellIDs) then
+  if IsStrictSyncMode() and not BuildSpellSet(user.spellIDs)[payload.spellID] then
+    return
+  end
+  if not IsStrictSyncMode() and not next(user.spellIDs) then
     RegisterUserManifest(user, { payload.spellID })
   end
 
@@ -1048,22 +1081,20 @@ local function HandleSyncDefensiveStateMessage(payload, sender)
     cooldown = trackedSpell.cd
   end
 
-  local readyAt = payload.readyAt
-  if type(readyAt) ~= "number" or readyAt <= 0 then
-    readyAt = 0
-  end
-
-  local startTime = 0
-  if readyAt > 0 and cooldown > 0 then
-    startTime = readyAt - cooldown
+  local now = GetTime()
+  local remaining = payload.remaining
+  if type(remaining) ~= "number" or remaining < 0 then
+    remaining = nil
   end
 
   local applied = runtime.engine:ApplySyncState(user.playerGUID, payload.spellID, {
     kind = payload.kind or "DEF",
     cd = cooldown,
     charges = payload.charges or 1,
-    readyAt = readyAt,
-    startTime = startTime,
+    remaining = remaining,
+    observedAt = now,
+    readyAt = payload.readyAt,
+    startTime = payload.startTime,
   })
 
   if applied then
@@ -1173,20 +1204,20 @@ function module:buildSettings(panel, helpers, addonRef, moduleDB)
   local behaviorBody = helpers:CreateSectionHint(behaviorColumn, "Preview, sync, and tooltip behavior.", 250)
   behaviorBody:SetPoint("TOPLEFT", behaviorLabel, "BOTTOMLEFT", 0, -8)
 
-  local previewBox = helpers:CreateInlineCheckbox(panel, "Show Preview When Solo", moduleDB.previewWhenSolo, function(value)
-    addonRef:SetModuleValue("PartyDefensiveTracker", "previewWhenSolo", value)
-  end)
-  previewBox:SetPoint("TOPLEFT", behaviorBody, "BOTTOMLEFT", 0, -12)
-
   local syncBox = helpers:CreateInlineCheckbox(panel, "Enable Party Sync", moduleDB.syncEnabled, function(value)
     addonRef:SetModuleValue("PartyDefensiveTracker", "syncEnabled", value)
   end)
-  syncBox:SetPoint("TOPLEFT", previewBox, "BOTTOMLEFT", 0, -8)
+  syncBox:SetPoint("TOPLEFT", behaviorBody, "BOTTOMLEFT", 0, -12)
+
+  local strictSyncBox = helpers:CreateInlineCheckbox(behaviorColumn, "Strict Sync Mode", moduleDB.strictSyncMode == true, function(value)
+    addonRef:SetModuleValue("PartyDefensiveTracker", "strictSyncMode", value)
+  end)
+  strictSyncBox:SetPoint("TOPLEFT", syncBox, "BOTTOMLEFT", 0, -8)
 
   local tooltipBox = helpers:CreateInlineCheckbox(behaviorColumn, "Show Tooltip", moduleDB.showTooltip ~= false, function(value)
     addonRef:SetModuleValue("PartyDefensiveTracker", "showTooltip", value)
   end)
-  tooltipBox:SetPoint("TOPLEFT", syncBox, "BOTTOMLEFT", 0, -8)
+  tooltipBox:SetPoint("TOPLEFT", strictSyncBox, "BOTTOMLEFT", 0, -8)
 
   local behaviorHint = helpers:CreateSectionHint(
     behaviorColumn,
@@ -1253,6 +1284,9 @@ function module:onConfigChanged(_, moduleDB)
   NormalizeAttachmentSettings(moduleDB)
   db = moduleDB
   HookCompactPartyFrame()
+  if moduleDB and moduleDB.enabled then
+    RefreshRuntimeRoster()
+  end
   UpdateAttachments()
 end
 
@@ -1337,13 +1371,13 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
       applied.charges = trackedSpell.charges or 1
 
       if db.syncEnabled ~= false then
-        addon:DebugLog("pdef", "send sync", canonicalSpellID, "cd", trackedSpell.cd, "readyAt", now + trackedSpell.cd)
+        addon:DebugLog("pdef", "send sync", canonicalSpellID, "cd", trackedSpell.cd, "remaining", trackedSpell.cd)
         Sync.Send("DEF_STATE", {
           spellID = canonicalSpellID,
           kind = "DEF",
           cd = trackedSpell.cd,
           charges = trackedSpell.charges or 1,
-          readyAt = now + trackedSpell.cd,
+          remaining = trackedSpell.cd,
         })
       end
       UpdateAttachments()

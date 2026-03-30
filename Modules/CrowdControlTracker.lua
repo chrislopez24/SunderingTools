@@ -50,6 +50,7 @@ local module = {
     barHeight = 18,
     fontSize = 11,
     syncEnabled = true,
+    strictSyncMode = false,
     showHeader = true,
     showInDungeon = true,
     showInRaid = true,
@@ -86,12 +87,17 @@ local runtime = {
   partyPetWatchFrames = {},
   partyUsers = {},
   partyAddonUsers = {},
+  partyManifests = {},
   recentPartyCasts = {},
   ccAuraPrevCount = {},
   lastHelloAt = 0,
   needsVisualRefresh = false,
   visualRefreshScheduled = false,
 }
+
+local function IsStrictSyncMode()
+  return db and db.strictSyncMode == true
+end
 
 local function GetCachedSpellTexture(spellID)
   if not spellID then
@@ -398,6 +404,71 @@ local function GetTrackedCrowdControlInfo(spellID)
   return nil
 end
 
+local function BuildSpellSet(spellIDs)
+  local spellSet = {}
+  for _, spellID in ipairs(spellIDs or {}) do
+    spellSet[spellID] = true
+  end
+  return spellSet
+end
+
+local function GetManifestForUser(shortName)
+  if not shortName or shortName == "" then
+    return nil
+  end
+
+  local manifest = runtime.partyManifests[shortName]
+  if not manifest then
+    manifest = {
+      spellList = {},
+      spells = {},
+    }
+    runtime.partyManifests[shortName] = manifest
+  end
+
+  return manifest
+end
+
+local function HasManifestSpell(shortName, spellID)
+  local manifest = shortName and runtime.partyManifests[shortName] or nil
+  return manifest ~= nil and manifest.spells ~= nil and manifest.spells[spellID] == true
+end
+
+local function GetLocalCrowdControlManifest()
+  local _, classToken = UnitClass("player")
+  if not classToken then
+    return {}
+  end
+
+  local entries = Model.GetEligibleCrowdControlEntries(classToken, {
+    includeAllKnown = true,
+    isSpellKnown = function(spellID)
+      return not IsSpellKnown or IsSpellKnown(spellID)
+    end,
+  })
+
+  local spellIDs = {}
+  for _, entry in ipairs(entries or {}) do
+    spellIDs[#spellIDs + 1] = entry.spellID
+  end
+
+  return spellIDs
+end
+
+local function GetEntryRemaining(entry, now)
+  if type(entry) ~= "table" then
+    return 0
+  end
+
+  now = now or GetTime()
+  local readyAt = entry.readyAt or 0
+  if type(readyAt) ~= "number" or readyAt <= 0 then
+    return 0
+  end
+
+  return math.max(0, readyAt - now)
+end
+
 local function RemovePartyUser(userKey)
   local existing = runtime.partyUsers[userKey]
   runtime.partyUsers[userKey] = nil
@@ -563,7 +634,7 @@ local function BuildRuntimeBarEntries()
   local entries = {}
   local unitsByToken = {}
   local now = GetTime()
-  local includeAutoFallbackBars = db.showAutoFallbackBars ~= false
+  local includeAutoFallbackBars = (db.showAutoFallbackBars ~= false) and not IsStrictSyncMode()
 
   for _, unit in ipairs(BuildRuntimeUnitsForDisplay()) do
     unitsByToken[unit] = true
@@ -631,6 +702,10 @@ end
 
 local function CanRecordWatcherTimestamp(ownerUnit)
   if not ownerUnit or not UnitExists(ownerUnit) or not UnitIsPlayer(ownerUnit) then
+    return false
+  end
+
+  if IsStrictSyncMode() then
     return false
   end
 
@@ -705,6 +780,10 @@ end
 
 local function DetectCrowdControlAuras(unit)
   if not db or not db.enabled or not unit or not UnitExists(unit) then
+    return
+  end
+
+  if IsStrictSyncMode() then
     return
   end
 
@@ -819,6 +898,24 @@ local function AnnouncePresence()
     classToken = classToken or "UNKNOWN",
     specID = GetLocalPlayerSpecID(),
   })
+  Sync.Send("CC_MANIFEST", {
+    spells = GetLocalCrowdControlManifest(),
+  })
+  local playerGUID = UnitGUID("player")
+  if playerGUID then
+    for _, entry in ipairs(runtime.engine:GetEntriesByKind("CC")) do
+      if entry.playerGUID == playerGUID then
+        local remaining = GetEntryRemaining(entry)
+        if remaining > 0 then
+          Sync.Send("CC", {
+            spellID = entry.spellID,
+            cd = entry.baseCd or entry.cd or 0,
+            remaining = remaining,
+          })
+        end
+      end
+    end
+  end
 end
 
 local function HandleSyncHelloMessage(payload, sender)
@@ -834,15 +931,75 @@ local function HandleSyncHelloMessage(payload, sender)
   local senderShort = ShortName(sender)
   if senderShort and senderShort ~= "" then
     runtime.partyAddonUsers[senderShort] = true
+    GetManifestForUser(senderShort)
   end
 
-  RegisterRuntimeCrowdControl(unit, nil, nil, {
-    auto = true,
-  })
+  if not IsStrictSyncMode() then
+    RegisterRuntimeCrowdControl(unit, nil, nil, {
+      auto = true,
+    })
+  end
 
   if runtime.lastHelloAt <= 0 or (GetTime() - runtime.lastHelloAt) > 5 then
     AnnouncePresence()
+    return
   end
+
+  local playerGUID = UnitGUID("player")
+  if playerGUID then
+    for _, entry in ipairs(runtime.engine:GetEntriesByKind("CC")) do
+      if entry.playerGUID == playerGUID then
+        local remaining = GetEntryRemaining(entry)
+        if remaining > 0 then
+          Sync.Send("CC", {
+            spellID = entry.spellID,
+            cd = entry.baseCd or entry.cd or 0,
+            remaining = remaining,
+          })
+        end
+      end
+    end
+  end
+end
+
+local function PruneManifestCrowdControl(shortName, spellSet)
+  for userKey, data in pairs(runtime.partyUsers) do
+    if data.playerName == shortName and not spellSet[data.spellID] then
+      RemovePartyUser(userKey)
+    end
+  end
+end
+
+local function HandleSyncCrowdControlManifestMessage(payload, sender)
+  if not db or not db.enabled or db.syncEnabled == false then
+    return
+  end
+
+  local unit = GetUnitBySender(sender)
+  if not unit or unit == "player" then
+    return
+  end
+
+  local senderShort = ShortName(sender)
+  if not senderShort or senderShort == "" then
+    return
+  end
+
+  runtime.partyAddonUsers[senderShort] = true
+  local manifest = GetManifestForUser(senderShort)
+  manifest.spellList = {}
+  for _, spellID in ipairs(payload and payload.spells or {}) do
+    local trackedSpell = GetTrackedCrowdControlInfo(spellID)
+    if trackedSpell then
+      manifest.spellList[#manifest.spellList + 1] = spellID
+      RegisterRuntimeCrowdControl(unit, spellID, trackedSpell.cd, {
+        auto = false,
+      })
+    end
+  end
+
+  manifest.spells = BuildSpellSet(manifest.spellList)
+  PruneManifestCrowdControl(senderShort, manifest.spells)
 end
 
 local function HandleSyncCrowdControlMessage(message, sender)
@@ -853,6 +1010,11 @@ local function HandleSyncCrowdControlMessage(message, sender)
   local messageType, payload = Sync.Decode(message)
   if messageType == "HELLO" then
     HandleSyncHelloMessage(payload, sender)
+    return
+  end
+
+  if messageType == "CC_MANIFEST" then
+    HandleSyncCrowdControlManifestMessage(payload, sender)
     return
   end
 
@@ -876,12 +1038,33 @@ local function HandleSyncCrowdControlMessage(message, sender)
     return
   end
 
+  if IsStrictSyncMode() and not HasManifestSpell(senderShort, spellID) then
+    return
+  end
+
   local now = GetTime()
+  local remaining = payload.remaining
+  if type(remaining) ~= "number" or remaining < 0 then
+    remaining = cooldown
+  end
+
+  local readyAt = remaining > 0 and (now + remaining) or 0
+  local startTime = 0
+  if readyAt > 0 and cooldown > 0 then
+    startTime = readyAt - cooldown
+  end
+
   RegisterRuntimeCrowdControl(unit, spellID, cooldown, {
     auto = false,
+    startTime = startTime,
   })
 
-  local applied = runtime.engine:ApplySyncCast(UnitGUID(unit), spellID, now, now + cooldown)
+  local applied = runtime.engine:ApplySyncState(UnitGUID(unit), spellID, {
+    kind = "CC",
+    cd = cooldown,
+    remaining = remaining,
+    observedAt = now,
+  })
   if applied then
     applied.playerName = ShortName(UnitName(unit))
     applied.classToken = select(2, UnitClass(unit))
@@ -923,18 +1106,27 @@ end
 
 local function PruneRuntimeRoster()
   local currentNames = {}
+  local currentGuids = {}
   local playerName = ShortName(UnitName("player"))
+  local playerGUID = UnitGUID("player")
 
   if playerName and playerName ~= "" then
     currentNames[playerName] = true
+  end
+  if playerGUID then
+    currentGuids[playerGUID] = true
   end
 
   if IsInGroup() then
     for _, unit in ipairs(GetRuntimeUnits()) do
       if UnitExists(unit) then
         local name = ShortName(UnitName(unit))
+        local guid = UnitGUID(unit)
         if name and name ~= "" then
           currentNames[name] = true
+        end
+        if guid then
+          currentGuids[guid] = true
         end
       end
     end
@@ -958,6 +1150,18 @@ local function PruneRuntimeRoster()
     end
   end
 
+  for name in pairs(runtime.partyManifests) do
+    if not currentNames[name] then
+      runtime.partyManifests[name] = nil
+    end
+  end
+
+  for _, entry in ipairs(runtime.engine:GetEntriesByKind("CC")) do
+    if not currentGuids[entry.playerGUID] then
+      runtime.engine:RemoveEntry(entry.key)
+    end
+  end
+
   PrunePlayerKnownCrowdControl()
 end
 
@@ -972,6 +1176,26 @@ local function RefreshRuntimeCrowdControlRegistration()
 
   if not IsInGroup() or IsInRaid() then
     return
+  end
+
+  if not IsStrictSyncMode() then
+    return
+  end
+
+  for i = 1, 4 do
+    local unit = "party" .. i
+    if UnitExists(unit) then
+      local shortName = ShortName(UnitName(unit))
+      local manifest = shortName and runtime.partyManifests[shortName] or nil
+      for _, spellID in ipairs((manifest and manifest.spellList) or {}) do
+        local trackedSpell = GetTrackedCrowdControlInfo(spellID)
+        if trackedSpell then
+          RegisterRuntimeCrowdControl(unit, spellID, trackedSpell.cd, {
+            auto = false,
+          })
+        end
+      end
+    end
   end
 end
 
@@ -1058,10 +1282,15 @@ function module:buildSettings(panel, helpers, addonRef, moduleDB)
   end)
   syncEnabledBox:SetPoint("TOPLEFT", previewWhenSoloBox, "BOTTOMLEFT", 0, -8)
 
+  local strictSyncBox = helpers:CreateInlineCheckbox(behaviorColumn, "Strict Sync Mode", moduleDB.strictSyncMode == true, function(value)
+    addonRef:SetModuleValue("CrowdControlTracker", "strictSyncMode", value)
+  end)
+  strictSyncBox:SetPoint("TOPLEFT", syncEnabledBox, "BOTTOMLEFT", 0, -8)
+
   local showReadyBox = helpers:CreateInlineCheckbox(behaviorColumn, "Show Ready Bars", moduleDB.showReady ~= false, function(value)
     addonRef:SetModuleValue("CrowdControlTracker", "showReady", value)
   end)
-  showReadyBox:SetPoint("TOPLEFT", syncEnabledBox, "BOTTOMLEFT", 0, -8)
+  showReadyBox:SetPoint("TOPLEFT", strictSyncBox, "BOTTOMLEFT", 0, -8)
 
   local hideOutOfCombatBox = helpers:CreateInlineCheckbox(behaviorColumn, "Hide Out of Combat", moduleDB.hideOutOfCombat, function(value)
     addonRef:SetModuleValue("CrowdControlTracker", "hideOutOfCombat", value)
@@ -1209,6 +1438,7 @@ function module:onConfigChanged(addonRef, moduleDB, key)
     or key == "showReady"
     or key == "tooltipOnHover"
     or key == "syncEnabled"
+    or key == "strictSyncMode"
     or key == "filterMode" then
     CreateContainer()
     UpdatePartyData()
@@ -1784,6 +2014,7 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
   elseif event == "PLAYER_ENTERING_WORLD" then
     wipe(runtime.partyUsers)
     wipe(runtime.partyAddonUsers)
+    wipe(runtime.partyManifests)
     wipe(runtime.recentPartyCasts)
     wipe(runtime.ccAuraPrevCount)
     runtime.engine:Reset()
@@ -1810,6 +2041,7 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
 
   elseif event == "CHALLENGE_MODE_START" then
     wipe(runtime.partyAddonUsers)
+    wipe(runtime.partyManifests)
     wipe(runtime.recentPartyCasts)
     wipe(runtime.ccAuraPrevCount)
     runtime.lastHelloAt = 0
@@ -1884,10 +2116,11 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
       ApplyRuntimeCooldownEntry(applied)
       addon:DebugLog("cc", "self cast", spellID, "cd", trackedSpell.cd)
       if db.syncEnabled ~= false then
-        addon:DebugLog("cc", "send sync", spellID, "cd", trackedSpell.cd)
+        addon:DebugLog("cc", "send sync", spellID, "cd", trackedSpell.cd, "remaining", trackedSpell.cd)
         Sync.Send("CC", {
           spellID = spellID,
           cd = trackedSpell.cd,
+          remaining = trackedSpell.cd,
         })
       end
     end
@@ -1899,7 +2132,7 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
     end
 
     local messageType = Sync.Decode(message)
-    if messageType == "HELLO" or messageType == "CC" then
+    if messageType == "HELLO" or messageType == "CC" or messageType == "CC_MANIFEST" then
       addon:DebugLog("cc", "recv sync", sender or "?", message or "")
     end
 

@@ -431,7 +431,7 @@ do
     },
   })
 
-  state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "DEF_STATE:51052:RAID_DEF:120:1:220", nil, "Other-Realm")
+  state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "DEF_STATE:51052:RAID_DEF:120:1:120", nil, "Other-Realm")
 
   assert(#getRaidEntryKeys(state.runtime) == 0, "disabled raid defensive tracker should ignore inbound sync state")
   assert(next(state.runtime.partyUsers) == nil, "disabled raid defensive tracker should not create remote users from sync traffic")
@@ -449,7 +449,7 @@ do
     },
   })
 
-  state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "DEF_STATE:51052:RAID_DEF:120:1:220", nil, "Other-Realm")
+  state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "DEF_STATE:51052:RAID_DEF:120:1:120", nil, "Other-Realm")
 
   assert(#getRaidEntryKeys(state.runtime) == 0, "sync-disabled raid defensive tracker should ignore inbound sync state")
   assert(next(state.runtime.partyUsers) == nil, "sync-disabled raid defensive tracker should not create remote users from sync traffic")
@@ -506,14 +506,14 @@ do
     syncEnabled = true,
   }, roster)
 
-  state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "DEF_STATE:51052:RAID_DEF:120:1:220", nil, "Other-Realm")
+  state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "DEF_STATE:51052:RAID_DEF:120:1:120", nil, "Other-Realm")
   local placeholderKeys = getRaidEntryKeys(state.runtime)
   assert(#placeholderKeys == 1 and placeholderKeys[1] == "sync:Other:51052", "sync-only users should create a placeholder runtime entry before roster data arrives")
 
   state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "DEF_MANIFEST:", nil, "Other-Realm")
   assert(#getRaidEntryKeys(state.runtime) == 0, "empty manifests should prune stale raid defensive runtime entries")
 
-  state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "DEF_STATE:51052:RAID_DEF:120:1:220", nil, "Other-Realm")
+  state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "DEF_STATE:51052:RAID_DEF:120:1:120", nil, "Other-Realm")
   roster._group = true
   roster.party1 = {
     guid = "party-guid",
@@ -540,6 +540,39 @@ do
   assert(foundPlaceholderEntry == false, "roster refresh should remove the stale placeholder runtime entry once a real roster identity is known")
   assert(remoteEntryCount == 1, "roster refresh should not leave duplicate remote raid defensive entries for the same player")
   assert(state.runtime.partyUsers.Other.playerGUID == "party-guid", "party user state should use the live roster guid after reconciliation")
+end
+
+do
+  local state = loadTracker({
+    enabled = true,
+    syncEnabled = true,
+    strictSyncMode = true,
+  }, {
+    _group = true,
+    player = {
+      guid = "player-guid",
+      name = "Player-Realm",
+      classToken = "DEATHKNIGHT",
+      specID = 250,
+    },
+    party1 = {
+      guid = "party-guid",
+      name = "Other-Realm",
+      classToken = "DEATHKNIGHT",
+      specID = 250,
+    },
+  })
+
+  state.onEvent(nil, "GROUP_ROSTER_UPDATE")
+  local baselineKeys = getRaidEntryKeys(state.runtime)
+  state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "DEF_STATE:51052:RAID_DEF:120:1:120", nil, "Other-Realm")
+  local keysWithoutManifest = getRaidEntryKeys(state.runtime)
+  assert(#keysWithoutManifest == #baselineKeys, "strict raid defensive mode should ignore synced state until a manifest is known")
+
+  state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "DEF_MANIFEST:RAID_DEF:51052", nil, "Other-Realm")
+  state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "DEF_STATE:51052:RAID_DEF:120:1:120", nil, "Other-Realm")
+  local keysWithManifest = getRaidEntryKeys(state.runtime)
+  assert(#keysWithManifest == (#baselineKeys + 1), "strict raid defensive mode should accept synced state after a manifest announces the spell")
 end
 
 do
@@ -677,5 +710,5 @@ do
   assert(type(syncedState) == "table", "raid defensive self casts should broadcast sync state for Anti-Magic Zone")
   assert(syncedState.kind == "RAID_DEF", "raid defensive self casts should broadcast the RAID_DEF kind")
   assert(syncedState.cd == 180, "raid defensive self casts should sync the locally reduced Anti-Magic Zone cooldown")
-  assert(syncedState.readyAt == 280, "raid defensive self casts should sync the locally reduced readyAt for Anti-Magic Zone")
+  assert(syncedState.remaining == 180, "raid defensive self casts should sync the locally reduced remaining cooldown for Anti-Magic Zone")
 end

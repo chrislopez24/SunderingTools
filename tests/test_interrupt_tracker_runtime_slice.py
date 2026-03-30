@@ -168,6 +168,16 @@ def test_interrupt_tracker_supports_raid_sync_and_kryos_style_visibility_control
     assert 'bar:SetScript("OnLeave", function() GameTooltip:Hide() end)' in source
 
 
+def test_interrupt_tracker_supports_strict_sync_mode_and_manifest_replay():
+    source = read("Modules/InterruptTracker.lua")
+
+    assert "strictSyncMode = false" in source
+    assert "local function IsStrictSyncMode()" in source
+    assert 'Sync.Send("INT_MANIFEST"' in source
+    assert "payload.remaining" in source
+    assert "HasManifestSpell(senderShort, spellID)" in source
+
+
 def test_interrupt_tracker_registers_kryos_style_enemy_watchers_for_interrupt_correlation():
     source = read("Modules/InterruptTracker.lua")
 

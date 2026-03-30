@@ -352,13 +352,13 @@ end
 
 function Helpers:CreateLabeledDropdown(parent, label, options, selectedValue, width, onChange)
   local holder = CreateFrame("Frame", nil, parent)
-  holder:SetSize((width or (self.ColumnWidth - 28)) + 32, 46)
+  holder:SetSize((width or (self.ColumnWidth - 28)) + 32, 58)
 
   holder.label = CreateTextBlock(holder, label, "GameFontHighlight", width or (self.ColumnWidth - 28))
   holder.label:SetPoint("TOPLEFT", 0, 0)
 
   local dropdown = CreateFrame("Frame", nil, holder, "UIDropDownMenuTemplate")
-  dropdown:SetPoint("TOPLEFT", -12, -10)
+  dropdown:SetPoint("TOPLEFT", -12, -18)
   dropdown.value = selectedValue
 
   local function GetOptionText(option)
@@ -496,6 +496,8 @@ local function CreateNavButton(parent, text, onClick)
 
   button.text = button:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
   button.text:SetPoint("LEFT", 10, 0)
+  button.text:SetPoint("RIGHT", -10, 0)
+  button.text:SetJustifyH("LEFT")
   button.text:SetText(text)
   button.text:SetTextColor(unpack(Theme.idleText))
 
@@ -508,7 +510,7 @@ end
 
 local function CreateSettingsFrame()
   local frame = CreateFrame("Frame", "SunderingToolsSettings", UIParent, BackdropTemplateMixin and "BackdropTemplate" or nil)
-  frame:SetSize(840, 560)
+  frame:SetSize(920, 560)
   frame:SetPoint("CENTER")
   frame:SetFrameStrata("DIALOG")
   frame:SetClampedToScreen(true)
@@ -552,7 +554,7 @@ local function CreateSettingsFrame()
   frame.sidebar = CreateFrame("Frame", nil, frame, BackdropTemplateMixin and "BackdropTemplate" or nil)
   frame.sidebar:SetPoint("TOPLEFT", 10, -56)
   frame.sidebar:SetPoint("BOTTOMLEFT", 10, 10)
-  frame.sidebar:SetWidth(148)
+  frame.sidebar:SetWidth(192)
   ApplySolidBackdrop(frame.sidebar, Theme.sidebarBg)
 
   frame.contentPane = CreateFrame("Frame", nil, frame, BackdropTemplateMixin and "BackdropTemplate" or nil)

@@ -10,9 +10,9 @@ def read(path: str) -> str:
 
 def test_settings_shell_matches_pedrolust_contract():
     source = read("Settings.lua")
-    assert 'frame:SetSize(840, 560)' in source
+    assert 'frame:SetSize(920, 560)' in source
     assert 'frame.headerBar:SetHeight(40)' in source
-    assert 'frame.sidebar:SetWidth(148)' in source
+    assert 'frame.sidebar:SetWidth(192)' in source
     assert 'frame.headerTitle = CreateTextBlock(frame.headerBar, "SunderingTools"' in source
     assert 'frame.headerByline = CreateTextBlock(frame.headerBar, "|cffbbbbbbby Krich|r"' in source
     assert 'frame.headerMeta:SetText("Dungeon utility toolkit  |  v" .. ADDON_VERSION)' not in source
@@ -40,8 +40,10 @@ def test_settings_helpers_support_dense_pedrolust_form_layout():
     assert "buttonBg = { 0.08, 0.10, 0.12, 0.98 }" in source
     assert "buttonHighlight = { 0.11, 0.16, 0.19, 1.0 }" in source
     assert "button.Label:SetTextColor(unpack(Theme.idleText))" in source
-    assert 'holder:SetSize((width or (self.ColumnWidth - 28)) + 32, 46)' in source
-    assert 'dropdown:SetPoint("TOPLEFT", -12, -10)' in source
+    assert 'button.text:SetPoint("RIGHT", -10, 0)' in source
+    assert 'button.text:SetJustifyH("LEFT")' in source
+    assert 'holder:SetSize((width or (self.ColumnWidth - 28)) + 32, 58)' in source
+    assert 'dropdown:SetPoint("TOPLEFT", -12, -18)' in source
 
 
 def test_general_section_uses_dense_linear_controls():
@@ -130,6 +132,7 @@ def test_party_defensive_page_exposes_attachment_and_tooltip_controls():
         "Reset Position",
     ):
         assert label in source
+    assert "Show Preview When Solo" not in source
 
 
 def test_settings_section_switch_resets_scroll_position():

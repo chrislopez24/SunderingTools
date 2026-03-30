@@ -22,16 +22,36 @@ assert(manifestType == "DEF_MANIFEST", "manifest decode should preserve message 
 assert(manifestPayload.kind == "RAID_DEF", "manifest decode should preserve the tracking kind")
 assert(manifestPayload.spells[1] == 51052 and manifestPayload.spells[2] == 196718, "manifest decode should preserve spell ids")
 
+local interruptManifestEncoded = Sync.Encode("INT_MANIFEST", {
+  spells = { 6552 },
+})
+assert(interruptManifestEncoded == "INT_MANIFEST:6552", "interrupt manifests should encode the owned interrupt spell list")
+
+local interruptManifestType, interruptManifestPayload = Sync.Decode(interruptManifestEncoded)
+assert(interruptManifestType == "INT_MANIFEST", "interrupt manifest decode should preserve message type")
+assert(interruptManifestPayload.spells[1] == 6552, "interrupt manifest decode should preserve spell ids")
+
+local ccManifestEncoded = Sync.Encode("CC_MANIFEST", {
+  spells = { 113724, 31661 },
+})
+assert(ccManifestEncoded == "CC_MANIFEST:113724,31661", "crowd control manifests should encode tracked spell lists")
+
+local ccManifestType, ccManifestPayload = Sync.Decode(ccManifestEncoded)
+assert(ccManifestType == "CC_MANIFEST", "crowd control manifest decode should preserve message type")
+assert(ccManifestPayload.spells[1] == 113724 and ccManifestPayload.spells[2] == 31661, "crowd control manifest decode should preserve spell ids")
+
 local encoded = Sync.Encode("INT", {
   spellID = 1766,
   cd = 15,
+  remaining = 8,
 })
 
 local messageType, payload = Sync.Decode(encoded)
-assert(encoded == "INT:1766:15", "interrupt payloads should match the Kryos-style message shape")
+assert(encoded == "INT:1766:15:8", "interrupt payloads should include remaining time when available")
 assert(messageType == "INT", "sync decode should preserve message type")
 assert(payload.spellID == 1766, "sync decode should preserve spell ID")
 assert(payload.cd == 15, "sync decode should preserve cooldown")
+assert(payload.remaining == 8, "sync decode should preserve remaining time when available")
 
 local registeredPrefix
 local originalChatInfo = C_ChatInfo

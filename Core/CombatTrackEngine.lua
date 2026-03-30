@@ -255,6 +255,26 @@ function Engine:ApplySyncState(playerGUID, spellID, fields)
     cooldown = nil
   end
 
+  local observedAt = fields.observedAt
+  if type(observedAt) ~= "number" then
+    observedAt = nil
+  end
+
+  local remaining = fields.remaining
+  if type(remaining) ~= "number" or remaining < 0 then
+    remaining = nil
+  end
+
+  local startTime = fields.startTime
+  local readyAt = fields.readyAt
+
+  if remaining ~= nil and observedAt ~= nil then
+    readyAt = observedAt + remaining
+    if cooldown and cooldown > 0 then
+      startTime = readyAt - cooldown
+    end
+  end
+
   return self:UpsertEntry({
     key = resolveKey(playerGUID, spellID),
     playerGUID = playerGUID,
@@ -264,8 +284,8 @@ function Engine:ApplySyncState(playerGUID, spellID, fields)
     cd = cooldown,
     baseCd = cooldown,
     charges = fields.charges,
-    startTime = fields.startTime,
-    readyAt = fields.readyAt,
+    startTime = startTime,
+    readyAt = readyAt,
   })
 end
 

@@ -70,6 +70,7 @@ local module = {
         barHeight = 18,
         fontSize = 11,
         syncEnabled = true,
+        strictSyncMode = false,
         showHeader = true,
         showInDungeon = true,
         showInRaid = true,
@@ -116,9 +117,14 @@ local runtime = {
     lastCorrName = nil,
     lastCorrTime = 0,
     partyUsers = {},
+    partyManifests = {},
     noInterruptPlayers = {},
     recentPartyCasts = {},
 }
+
+local function IsStrictSyncMode()
+    return db and db.strictSyncMode == true
+end
 
 local function GetCachedSpellTexture(spellID)
     if not spellID then
@@ -451,6 +457,85 @@ local function GetUnitBySender(sender)
     return nil
 end
 
+local function BuildSpellSet(spellIDs)
+    local spellSet = {}
+    for _, spellID in ipairs(spellIDs or {}) do
+        spellSet[spellID] = true
+    end
+    return spellSet
+end
+
+local function GetManifestForUser(shortName)
+    if not shortName or shortName == "" then
+        return nil
+    end
+
+    local manifest = runtime.partyManifests[shortName]
+    if not manifest then
+        manifest = {
+            spells = {},
+        }
+        runtime.partyManifests[shortName] = manifest
+    end
+
+    return manifest
+end
+
+local function HasManifestSpell(shortName, spellID)
+    local manifest = shortName and runtime.partyManifests[shortName] or nil
+    return manifest ~= nil and manifest.spells ~= nil and manifest.spells[spellID] == true
+end
+
+local function GetManifestSpellID(shortName)
+    local manifest = shortName and runtime.partyManifests[shortName] or nil
+    if not manifest or type(manifest.spellList) ~= "table" then
+        return nil
+    end
+
+    return manifest.spellList[1]
+end
+
+local function RegisterInterruptManifest(shortName, spellIDs)
+    local manifest = GetManifestForUser(shortName)
+    if not manifest then
+        return nil
+    end
+
+    manifest.spellList = {}
+    for _, spellID in ipairs(spellIDs or {}) do
+        local trackedSpell = SpellDB.GetTrackedSpell(spellID)
+        if trackedSpell and trackedSpell.kind == "INT" then
+            manifest.spellList[#manifest.spellList + 1] = spellID
+        end
+    end
+
+    manifest.spells = BuildSpellSet(manifest.spellList)
+    return manifest
+end
+
+local function GetLocalInterruptManifest()
+    local interruptEntry = select(1, GetUnitInterruptData("player"))
+    if not interruptEntry or not interruptEntry.spellID then
+        return {}
+    end
+
+    return { interruptEntry.spellID }
+end
+
+local function GetEntryRemaining(entry, now)
+    if type(entry) ~= "table" then
+        return 0
+    end
+
+    now = now or GetTime()
+    local readyAt = entry.readyAt or 0
+    if type(readyAt) ~= "number" or readyAt <= 0 then
+        return 0
+    end
+
+    return math.max(0, readyAt - now)
+end
+
 local function FindGroupUnitByShortName(shortName)
     if not shortName then
         return nil
@@ -488,6 +573,7 @@ local function RemovePartyUser(shortName)
 
     local existing = runtime.partyUsers[shortName]
     runtime.partyUsers[shortName] = nil
+    runtime.partyManifests[shortName] = nil
 
     if existing and existing.guid and existing.spellID then
         runtime.engine:RemoveEntry(BuildEntryKey(existing.guid, existing.spellID))
@@ -497,6 +583,10 @@ end
 local function RegisterRuntimeInterrupt(unit, spellID, cooldownOverride, options)
     options = options or {}
     if not unit or not UnitExists(unit) then
+        return nil
+    end
+
+    if IsStrictSyncMode() and options.auto and unit ~= "player" then
         return nil
     end
 
@@ -593,10 +683,21 @@ local function RefreshRuntimePartyRegistration()
     for i = 1, 4 do
         local unit = "party" .. i
         if UnitExists(unit) then
-            RegisterRuntimeInterrupt(unit, nil, nil, {
-                auto = true,
-                source = "auto",
-            })
+            local shortName = ShortName(UnitName(unit))
+            if not IsStrictSyncMode() then
+                RegisterRuntimeInterrupt(unit, nil, nil, {
+                    auto = true,
+                    source = "auto",
+                })
+            else
+                local manifestSpellID = GetManifestSpellID(shortName)
+                if manifestSpellID then
+                    RegisterRuntimeInterrupt(unit, manifestSpellID, nil, {
+                        auto = false,
+                        source = "sync",
+                    })
+                end
+            end
         end
     end
 end
@@ -724,6 +825,8 @@ local function ApplyRuntimeCooldownEntry(entry, countInterrupt)
     ReLayout()
 end
 
+local SendCurrentSelfState
+
 local function AnnouncePresence()
     if not db or not db.enabled or db.syncEnabled == false or not IsInGroup() then
         return
@@ -736,6 +839,34 @@ local function AnnouncePresence()
         classToken = classToken or "UNKNOWN",
         specID = specID,
     })
+    Sync.Send("INT_MANIFEST", {
+        spells = GetLocalInterruptManifest(),
+    })
+    SendCurrentSelfState()
+end
+
+SendCurrentSelfState = function()
+    if not db or not db.enabled or db.syncEnabled == false or not IsInGroup() then
+        return
+    end
+
+    local playerGUID = UnitGUID("player")
+    if not playerGUID then
+        return
+    end
+
+    for _, entry in ipairs(runtime.engine:GetEntriesByKind("INT")) do
+        if entry.playerGUID == playerGUID then
+            local remaining = GetEntryRemaining(entry)
+            if remaining > 0 then
+                Sync.Send("INT", {
+                    spellID = entry.spellID,
+                    cd = entry.baseCd or entry.cd or 0,
+                    remaining = remaining,
+                })
+            end
+        end
+    end
 end
 
 local function HandleSyncHelloMessage(payload, sender)
@@ -753,17 +884,60 @@ local function HandleSyncHelloMessage(payload, sender)
         _, classToken = UnitClass(unit)
     end
 
-    RegisterRuntimeInterrupt(unit, nil, nil, {
-        auto = false,
-        source = "auto",
-    })
+    local senderShort = ShortName(sender)
+    if senderShort and senderShort ~= "" then
+        GetManifestForUser(senderShort)
+    end
+
+    if not IsStrictSyncMode() then
+        RegisterRuntimeInterrupt(unit, nil, nil, {
+            auto = false,
+            source = "auto",
+        })
+    end
 
     if runtime.lastHelloAt <= 0 or (GetTime() - runtime.lastHelloAt) > 5 then
         AnnouncePresence()
     end
+    SendCurrentSelfState()
+end
+
+local function HandleSyncInterruptManifestMessage(payload, sender)
+    if not db or not db.enabled or db.syncEnabled == false then
+        return
+    end
+
+    local unit = GetUnitBySender(sender)
+    if not unit or unit == "player" then
+        return
+    end
+
+    local shortName = ShortName(sender)
+    if not shortName or shortName == "" then
+        return
+    end
+
+    local existing = runtime.partyUsers[shortName]
+    local manifest = RegisterInterruptManifest(shortName, payload and payload.spells or {})
+    local manifestSpellID = manifest and manifest.spellList and manifest.spellList[1] or nil
+    if existing and existing.guid and existing.spellID and existing.spellID ~= manifestSpellID then
+        runtime.engine:RemoveEntry(BuildEntryKey(existing.guid, existing.spellID))
+    end
+    if manifestSpellID then
+        RegisterRuntimeInterrupt(unit, manifestSpellID, nil, {
+            auto = false,
+            source = "sync",
+        })
+    elseif IsStrictSyncMode() then
+        RemovePartyUser(shortName)
+    end
 end
 
 local function HandleEnemyInterrupted()
+    if IsStrictSyncMode() then
+        return
+    end
+
     local now = GetTime()
     local bestName = nil
     local bestDelta = 999
@@ -844,6 +1018,10 @@ local function CanRecordWatcherTimestamp(ownerUnit)
         return false
     end
 
+    if IsStrictSyncMode() then
+        return false
+    end
+
     local shortName = ShortName(UnitName(ownerUnit))
     if not shortName or shortName == "" or runtime.noInterruptPlayers[shortName] then
         return false
@@ -895,6 +1073,11 @@ local function HandleSyncInterruptMessage(message, sender)
         return
     end
 
+    if messageType == "INT_MANIFEST" then
+        HandleSyncInterruptManifestMessage(payload, sender)
+        return
+    end
+
     if messageType ~= "INT" then
         return
     end
@@ -905,20 +1088,43 @@ local function HandleSyncInterruptMessage(message, sender)
         return
     end
 
+    local senderShort = ShortName(sender)
+    if IsStrictSyncMode() and not HasManifestSpell(senderShort, spellID) then
+        return
+    end
+
     local now = GetTime()
+    local remaining = payload.remaining
+    if type(remaining) ~= "number" or remaining < 0 then
+        remaining = cooldown
+    end
+
+    local readyAt = remaining > 0 and (now + remaining) or 0
+    local startTime = 0
+    if readyAt > 0 and cooldown > 0 then
+        startTime = readyAt - cooldown
+    end
+
     local registered = RegisterRuntimeInterrupt(unit, spellID, cooldown, {
         auto = false,
         source = "sync",
-        startTime = now,
-        readyAt = now + cooldown,
+        startTime = startTime,
+        readyAt = readyAt,
     })
     if not registered then
         return
     end
 
-    local applied = runtime.engine:ApplySyncCast(UnitGUID(unit), spellID, now, now + cooldown)
+    local applied = runtime.engine:ApplySyncState(UnitGUID(unit), spellID, {
+        kind = "INT",
+        cd = cooldown,
+        remaining = remaining,
+        observedAt = now,
+    })
     if applied then
         applied.playerName = ShortName(UnitName(unit))
+        applied.classToken = select(2, UnitClass(unit))
+        applied.unitToken = unit
         ApplyRuntimeCooldownEntry(applied, true)
     end
 end
@@ -1001,10 +1207,15 @@ function module:buildSettings(panel, helpers, addonRef, moduleDB)
     end)
     syncEnabledBox:SetPoint("TOPLEFT", previewWhenSoloBox, "BOTTOMLEFT", 0, -8)
 
+    local strictSyncBox = helpers:CreateInlineCheckbox(behaviorColumn, "Strict Sync Mode", moduleDB.strictSyncMode == true, function(value)
+        addonRef:SetModuleValue("InterruptTracker", "strictSyncMode", value)
+    end)
+    strictSyncBox:SetPoint("TOPLEFT", syncEnabledBox, "BOTTOMLEFT", 0, -8)
+
     local showReadyBox = helpers:CreateInlineCheckbox(behaviorColumn, "Show Ready Bars", moduleDB.showReady ~= false, function(value)
         addonRef:SetModuleValue("InterruptTracker", "showReady", value)
     end)
-    showReadyBox:SetPoint("TOPLEFT", syncEnabledBox, "BOTTOMLEFT", 0, -8)
+    showReadyBox:SetPoint("TOPLEFT", strictSyncBox, "BOTTOMLEFT", 0, -8)
 
     local hideOutOfCombatBox = helpers:CreateInlineCheckbox(behaviorColumn, "Hide Out of Combat", moduleDB.hideOutOfCombat, function(value)
         addonRef:SetModuleValue("InterruptTracker", "hideOutOfCombat", value)
@@ -1169,6 +1380,7 @@ function module:onConfigChanged(addonRef, moduleDB, key)
         or key == "showReady"
         or key == "tooltipOnHover"
         or key == "syncEnabled"
+        or key == "strictSyncMode"
         or key == "readySoundEnabled"
         or key == "readySoundPath"
         or key == "readySoundChannel" then
@@ -1652,18 +1864,27 @@ end
 
 local function PruneRuntimeRoster()
     local currentNames = {}
+    local currentGuids = {}
     local playerName = ShortName(UnitName("player"))
+    local playerGUID = UnitGUID("player")
 
     if playerName and playerName ~= "" then
         currentNames[playerName] = true
+    end
+    if playerGUID then
+        currentGuids[playerGUID] = true
     end
 
     if IsInGroup() then
         for _, unit in ipairs(GetRuntimeUnits()) do
             if UnitExists(unit) then
                 local name = ShortName(UnitName(unit))
+                local guid = UnitGUID(unit)
                 if name and name ~= "" then
                     currentNames[name] = true
+                end
+                if guid then
+                    currentGuids[guid] = true
                 end
             end
         end
@@ -1681,9 +1902,21 @@ local function PruneRuntimeRoster()
         end
     end
 
+    for name in pairs(runtime.partyManifests) do
+        if not currentNames[name] then
+            runtime.partyManifests[name] = nil
+        end
+    end
+
     for name in pairs(runtime.recentPartyCasts) do
         if not currentNames[name] then
             runtime.recentPartyCasts[name] = nil
+        end
+    end
+
+    for _, entry in ipairs(runtime.engine:GetEntriesByKind("INT")) do
+        if not currentGuids[entry.playerGUID] then
+            runtime.engine:RemoveEntry(entry.key)
         end
     end
 end
@@ -1888,6 +2121,7 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
 
     elseif event == "PLAYER_ENTERING_WORLD" then
         wipe(runtime.partyUsers)
+        wipe(runtime.partyManifests)
         wipe(runtime.noInterruptPlayers)
         wipe(runtime.recentPartyCasts)
         wipe(cooldownState)
@@ -1918,6 +2152,7 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         end)
 
     elseif event == "CHALLENGE_MODE_START" then
+        wipe(runtime.partyManifests)
         wipe(runtime.recentPartyCasts)
         wipe(cooldownState)
         runtime.engine:Reset()
@@ -1991,10 +2226,11 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
                 ApplyRuntimeCooldownEntry(applied, true)
                 addon:DebugLog("int", "self cast", canonicalSpellID, "cd", cooldown)
                 if db.syncEnabled ~= false then
-                    addon:DebugLog("int", "send sync", canonicalSpellID, "cd", cooldown)
+                    addon:DebugLog("int", "send sync", canonicalSpellID, "cd", cooldown, "remaining", cooldown)
                     Sync.Send("INT", {
                         spellID = canonicalSpellID,
                         cd = cooldown,
+                        remaining = cooldown,
                     })
                 end
             end

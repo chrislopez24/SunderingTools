@@ -49,6 +49,7 @@ local module = {
     barHeight = 18,
     fontSize = 11,
     syncEnabled = true,
+    strictSyncMode = false,
     showHeader = true,
     showInDungeon = true,
     showInRaid = true,
@@ -219,6 +220,24 @@ end
 local function GetLocalOwnedRaidDefensives(classToken)
   local specID = GetLocalPlayerSpecID()
   return SpellDB.GetLocallyKnownRaidDefensiveSpellsForClass(classToken, specID, IsLocalSpellKnown), specID
+end
+
+local function GetEntryRemaining(entry, now)
+  if type(entry) ~= "table" then
+    return 0
+  end
+
+  now = now or GetTime()
+  local readyAt = entry.readyAt or 0
+  if type(readyAt) ~= "number" or readyAt <= 0 then
+    return 0
+  end
+
+  return math.max(0, readyAt - now)
+end
+
+local function IsStrictSyncMode()
+  return db and db.strictSyncMode == true
 end
 
 local function GetCachedSpellTexture(spellID)
@@ -496,13 +515,16 @@ local function SendCurrentSelfState()
 
   for _, entry in ipairs(runtime.engine:GetEntriesByKind("RAID_DEF")) do
     if entry.playerGUID == playerGUID then
-      Sync.Send("DEF_STATE", {
-        spellID = entry.spellID,
-        kind = "RAID_DEF",
-        cd = entry.baseCd or entry.cd or 0,
-        charges = entry.charges or 1,
-        readyAt = entry.readyAt or 0,
-      })
+      local remaining = GetEntryRemaining(entry)
+      if remaining > 0 then
+        Sync.Send("DEF_STATE", {
+          spellID = entry.spellID,
+          kind = "RAID_DEF",
+          cd = entry.baseCd or entry.cd or 0,
+          charges = entry.charges or 1,
+          remaining = remaining,
+        })
+      end
     end
   end
 end
@@ -677,6 +699,7 @@ local function HandleSyncHelloMessage(payload, sender)
     user.specID = payload.specID
   end
 
+  SendCurrentSelfState()
   UpdatePartyData()
 end
 
@@ -715,7 +738,10 @@ local function HandleSyncDefensiveStateMessage(payload, sender)
   if not user.classToken then
     user.classToken = trackedSpell.classToken
   end
-  if not next(user.spellIDs) then
+  if IsStrictSyncMode() and not BuildSpellSet(user.spellIDs)[payload.spellID] then
+    return
+  end
+  if not IsStrictSyncMode() and not next(user.spellIDs) then
     RegisterUserManifest(user, { payload.spellID })
   end
 
@@ -724,22 +750,20 @@ local function HandleSyncDefensiveStateMessage(payload, sender)
     cooldown = trackedSpell.cd
   end
 
-  local readyAt = payload.readyAt
-  if type(readyAt) ~= "number" or readyAt <= 0 then
-    readyAt = 0
-  end
-
-  local startTime = 0
-  if readyAt > 0 and cooldown > 0 then
-    startTime = readyAt - cooldown
+  local now = GetTime()
+  local remaining = payload.remaining
+  if type(remaining) ~= "number" or remaining < 0 then
+    remaining = nil
   end
 
   local applied = runtime.engine:ApplySyncState(user.playerGUID, payload.spellID, {
     kind = payload.kind or "RAID_DEF",
     cd = cooldown,
     charges = payload.charges or 1,
-    readyAt = readyAt,
-    startTime = startTime,
+    remaining = remaining,
+    observedAt = now,
+    readyAt = payload.readyAt,
+    startTime = payload.startTime,
   })
 
   if applied then
@@ -855,10 +879,15 @@ function module:buildSettings(panel, helpers, addonRef, moduleDB)
   end)
   syncEnabledBox:SetPoint("TOPLEFT", previewWhenSoloBox, "BOTTOMLEFT", 0, -8)
 
+  local strictSyncBox = helpers:CreateInlineCheckbox(behaviorColumn, "Strict Sync Mode", moduleDB.strictSyncMode == true, function(value)
+    addonRef:SetModuleValue("DefensiveRaidTracker", "strictSyncMode", value)
+  end)
+  strictSyncBox:SetPoint("TOPLEFT", syncEnabledBox, "BOTTOMLEFT", 0, -8)
+
   local showReadyBox = helpers:CreateInlineCheckbox(behaviorColumn, "Show Ready Bars", moduleDB.showReady ~= false, function(value)
     addonRef:SetModuleValue("DefensiveRaidTracker", "showReady", value)
   end)
-  showReadyBox:SetPoint("TOPLEFT", syncEnabledBox, "BOTTOMLEFT", 0, -8)
+  showReadyBox:SetPoint("TOPLEFT", strictSyncBox, "BOTTOMLEFT", 0, -8)
 
   local hideOutOfCombatBox = helpers:CreateInlineCheckbox(behaviorColumn, "Hide Out of Combat", moduleDB.hideOutOfCombat, function(value)
     addonRef:SetModuleValue("DefensiveRaidTracker", "hideOutOfCombat", value)
@@ -993,7 +1022,8 @@ function module:onConfigChanged(addonRef, moduleDB, key)
     or key == "hideOutOfCombat"
     or key == "showReady"
     or key == "tooltipOnHover"
-    or key == "syncEnabled" then
+    or key == "syncEnabled"
+    or key == "strictSyncMode" then
     CreateContainer()
     UpdatePartyData()
   end
@@ -1637,13 +1667,13 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
       applied.charges = trackedSpell.charges or 1
 
       if db.syncEnabled ~= false then
-        addon:DebugLog("rdef", "send sync", canonicalSpellID, "cd", trackedSpell.cd, "readyAt", now + trackedSpell.cd)
+        addon:DebugLog("rdef", "send sync", canonicalSpellID, "cd", trackedSpell.cd, "remaining", trackedSpell.cd)
         Sync.Send("DEF_STATE", {
           spellID = canonicalSpellID,
           kind = "RAID_DEF",
           cd = trackedSpell.cd,
           charges = trackedSpell.charges or 1,
-          readyAt = now + trackedSpell.cd,
+          remaining = trackedSpell.cd,
         })
       end
       UpdatePartyData()

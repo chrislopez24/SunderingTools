@@ -91,6 +91,7 @@ def test_crowd_control_tracker_only_registers_remote_members_after_addon_presenc
     source = read("Modules/CrowdControlTracker.lua")
 
     assert "partyAddonUsers = {}" in source
+    assert "partyManifests = {}" in source
     assert "runtime.partyAddonUsers[shortName]" in source or "runtime.partyAddonUsers[sourceShortName]" in source
     assert 'runtime.partyAddonUsers[senderShort] = true' in source
 
@@ -99,8 +100,9 @@ def test_crowd_control_tracker_only_registers_remote_members_after_addon_presenc
     refresh_block = source[refresh_start:refresh_end]
 
     assert 'RegisterRuntimeCrowdControl("player", nil, nil, {' in refresh_block
-    assert 'local unit = "party" .. i' not in refresh_block
-    assert "RegisterRuntimeCrowdControl(unit, nil, nil, {" not in refresh_block
+    assert 'Sync.Send("CC_MANIFEST"' in source
+    assert "if not IsStrictSyncMode() then" in refresh_block
+    assert 'RegisterRuntimeCrowdControl(unit, spellID, trackedSpell.cd, {' in refresh_block
 
 
 def test_crowd_control_tracker_supports_optional_tracker_header():
@@ -183,5 +185,15 @@ def test_crowd_control_tracker_keeps_party_sync_paths_while_engine_kind_lookup_i
     assert "self:GetEntries()" not in kind_block
 
     assert 'Sync.Send("CC"' in tracker_source
+    assert 'Sync.Send("CC_MANIFEST"' in tracker_source
     assert "HandleSyncCrowdControlMessage" in tracker_source
-    assert ":ApplySyncCast(" in tracker_source
+    assert ":ApplySyncState(" in tracker_source
+
+
+def test_crowd_control_tracker_supports_strict_sync_mode_and_remaining_based_replay():
+    source = read("Modules/CrowdControlTracker.lua")
+
+    assert "strictSyncMode = false" in source
+    assert "local function IsStrictSyncMode()" in source
+    assert "payload.remaining" in source
+    assert "HasManifestSpell(senderShort, spellID)" in source

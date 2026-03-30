@@ -66,3 +66,12 @@ def test_defensive_raid_tracker_only_registers_remote_members_from_sync_manifest
     assert "GetLocalOwnedRaidDefensives(classToken)" in roster_block
     assert "elseif previousUser and type(previousUser.spellIDs) == \"table\" and #previousUser.spellIDs > 0 then" in roster_block
     assert "SpellDB.GetKnownRaidDefensiveSpellsForClass" in roster_block
+
+
+def test_defensive_raid_tracker_supports_strict_sync_mode_and_remaining_payloads():
+    source = read("Modules/DefensiveRaidTracker.lua")
+
+    assert "strictSyncMode = false" in source
+    assert "local function IsStrictSyncMode()" in source
+    assert "payload.remaining" in source
+    assert 'remaining = trackedSpell.cd' in source

@@ -478,7 +478,7 @@ do
     },
   }, compactPartyFrame)
 
-  state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "DEF_STATE:48707:DEF:60:1:160", nil, "Other-Realm")
+  state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "DEF_STATE:48707:DEF:60:1:60", nil, "Other-Realm")
 
   assert(#getDefEntryKeys(state.runtime) == 0, "disabled party defensive tracker should ignore inbound sync state")
   assert(next(state.runtime.partyUsers) == nil, "disabled party defensive tracker should not create remote users from sync traffic")
@@ -504,7 +504,7 @@ do
     },
   }, compactPartyFrame)
 
-  state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "DEF_STATE:48707:DEF:60:1:160", nil, "Other-Realm")
+  state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "DEF_STATE:48707:DEF:60:1:60", nil, "Other-Realm")
 
   assert(#getDefEntryKeys(state.runtime) == 0, "sync-disabled party defensive tracker should ignore inbound sync state")
   assert(next(state.runtime.partyUsers) == nil, "sync-disabled party defensive tracker should not create remote users from sync traffic")
@@ -548,7 +548,7 @@ do
     syncEnabled = true,
   }, roster, compactPartyFrame)
 
-  state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "DEF_STATE:48707:DEF:60:1:160", nil, "Other-Realm")
+  state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "DEF_STATE:48707:DEF:60:1:60", nil, "Other-Realm")
   assert(#getDefEntryKeys(state.runtime) == 0, "senders outside the tracked live roster should be ignored before the party subset is known")
   assert(state.runtime.partyUsers.Other == nil, "unknown senders should not create placeholder users before they join the tracked subset")
 
@@ -560,7 +560,7 @@ do
   }
 
   state.onEvent(nil, "GROUP_ROSTER_UPDATE")
-  state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "DEF_STATE:48707:DEF:60:1:160", nil, "Other-Realm")
+  state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "DEF_STATE:48707:DEF:60:1:60", nil, "Other-Realm")
 
   local reconciledKeys = getDefEntryKeys(state.runtime)
   assert(#reconciledKeys >= 1, "group roster refresh should preserve tracked party defensive entries")
@@ -612,7 +612,7 @@ do
 
   state.onEvent(nil, "GROUP_ROSTER_UPDATE")
   local beforeKeys = getDefEntryKeys(state.runtime)
-  state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "DEF_STATE:48707:DEF:60:1:160", nil, "Intruder-Realm")
+  state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "DEF_STATE:48707:DEF:60:1:60", nil, "Intruder-Realm")
 
   local entryKeys = getDefEntryKeys(state.runtime)
   assert(#entryKeys == #beforeKeys, "non-party senders should not add placeholder defensive runtime entries")
@@ -643,7 +643,7 @@ do
     syncEnabled = true,
   }, roster, compactPartyFrame)
 
-  state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "DEF_STATE:48707:DEF:60:1:160", nil, "Other-Realm")
+  state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "DEF_STATE:48707:DEF:60:1:60", nil, "Other-Realm")
   state.onEvent(nil, "GROUP_ROSTER_UPDATE")
 
   assert(state.runtime.partyUsers.Other.playerGUID == "raid-guid", "raid-context compact party frames should still reconcile remote defensive owners from the live roster")
@@ -652,6 +652,41 @@ do
   assert(type(memberAttachment) == "table", "raid-context compact party member frames should still receive defensive attachments")
   assert(type(memberAttachment._entries) == "table" and #memberAttachment._entries >= 1, "raid-context compact party frames should still render defensive entries")
   assert(memberAttachment._entries[1].spellID == 48707, "raid-context compact party frames should keep the tracked DEF spell on the owner frame")
+end
+
+do
+  local compactPartyFrame = buildCompactPartyFrame()
+  compactPartyFrame.memberUnitFrames[1].unit = "player"
+  compactPartyFrame.memberUnitFrames[2].unit = "party1"
+
+  local state = loadTracker({
+    enabled = true,
+    syncEnabled = true,
+    strictSyncMode = true,
+  }, {
+    _group = true,
+    player = {
+      guid = "player-guid",
+      name = "Player-Realm",
+      classToken = "DEATHKNIGHT",
+    },
+    party1 = {
+      guid = "party-guid",
+      name = "Other-Realm",
+      classToken = "DEATHKNIGHT",
+    },
+  }, compactPartyFrame)
+
+  state.onEvent(nil, "GROUP_ROSTER_UPDATE")
+  local baselineKeys = getDefEntryKeys(state.runtime)
+  state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "DEF_STATE:48707:DEF:60:1:60", nil, "Other-Realm")
+  local keysWithoutManifest = getDefEntryKeys(state.runtime)
+  assert(#keysWithoutManifest == #baselineKeys, "strict party defensive mode should ignore synced state until a manifest is known")
+
+  state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "DEF_MANIFEST:DEF:48707", nil, "Other-Realm")
+  state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "DEF_STATE:48707:DEF:60:1:60", nil, "Other-Realm")
+  local keysWithManifest = getDefEntryKeys(state.runtime)
+  assert(#keysWithManifest == (#baselineKeys + 1), "strict party defensive mode should accept synced state after a manifest announces the spell")
 end
 
 do
@@ -822,6 +857,31 @@ do
   assert(GameTooltip.owner == nil, "showTooltip=false should suppress tooltip ownership on hover")
   assert(#GameTooltip.lines == 0, "showTooltip=false should suppress tooltip content")
   assert(GameTooltip.shown == false, "showTooltip=false should suppress tooltip display")
+end
+
+do
+  local compactPartyFrame = buildCompactPartyFrame()
+  compactPartyFrame.memberUnitFrames[1].unit = "player"
+
+  local state = loadTracker({
+    enabled = true,
+    syncEnabled = true,
+    previewWhenSolo = true,
+  }, {
+    player = {
+      guid = "player-guid",
+      name = "Player-Realm",
+      classToken = "DEATHKNIGHT",
+    },
+  }, compactPartyFrame)
+
+  state.addon.modules.PartyDefensiveTracker:SetEditMode(false)
+  local memberAttachment = compactPartyFrame.memberUnitFrames[1].SunderingToolsPartyDefensiveAttachment
+  assert(type(memberAttachment) == "table" and memberAttachment.shown == true, "enabled attachment tracker should render attachments before disable verification")
+
+  state.moduleDB.enabled = false
+  state.addon.modules.PartyDefensiveTracker:onConfigChanged(state.addon, state.moduleDB)
+  assert(memberAttachment.shown == false, "disabling the attachment tracker should hide existing party attachments immediately")
 end
 
 do
