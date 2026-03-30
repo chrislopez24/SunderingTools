@@ -4,3 +4,5 @@ ignore:
   - .github
   - docs
   - tests
+  - README.md
+  - .gitignore

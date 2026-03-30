@@ -19,6 +19,18 @@ def test_packaging_files_exist():
     assert (ROOT / ".github" / "workflows" / "release.yml").exists()
 
 
+def test_pkgmeta_excludes_development_only_content_from_release_zip():
+    pkgmeta = (ROOT / ".pkgmeta").read_text(encoding="utf-8")
+    for ignored in (
+        ".github",
+        "docs",
+        "tests",
+        "README.md",
+        ".gitignore",
+    ):
+        assert f"  - {ignored}" in pkgmeta
+
+
 def test_toc_no_missing_embeds_and_new_entrypoints():
     toc = (ROOT / "SunderingTools.toc").read_text(encoding="utf-8")
     assert "Libs\\LibStub\\LibStub.lua" not in toc
