@@ -40,6 +40,7 @@ local function loadModule(moduleDB)
     shell = nil,
     ticker = nil,
     secretName = "__SECRET_AURA_NAME__",
+    secretSpellID = {},
   }
 
   local function newUiObject(parent)
@@ -204,6 +205,9 @@ local function loadModule(moduleDB)
   }
   _G.C_Spell = {
     GetSpellTexture = function(spellID)
+      if spellID == state.secretSpellID then
+        error("attempt to use a secret spell id", 0)
+      end
       return "texture:" .. tostring(spellID)
     end,
   }
@@ -262,6 +266,9 @@ local function loadModule(moduleDB)
     state.stoppedSounds[#state.stoppedSounds + 1] = handle
   end
   _G.SlashCmdList = {}
+  _G.issecretvalue = function(value)
+    return value == state.secretName or value == state.secretSpellID
+  end
 
   local originalLower = string.lower
   string.lower = function(value)
@@ -416,4 +423,22 @@ do
   assert(#state.soundCalls == 1, "tracked bloodlust spell IDs should not require normalizing a secret aura name")
   assert(state.shell.shown == true, "tracked bloodlust spell IDs should still show the frame when the aura name is secret")
   assert(state.shell.cooldown.cooldownDuration == 40, "tracked bloodlust spell IDs should still use the active aura expiration time")
+end
+
+do
+  local state = loadModule()
+  state.helpfulAuras[1] = {
+    spellId = state.secretSpellID,
+    name = "Time Warp",
+    expirationTime = 140,
+    icon = nil,
+    iconFileID = nil,
+  }
+
+  state.onEvent(nil, "PLAYER_LOGIN")
+
+  assert(#state.soundCalls == 1, "known bloodlust names should still trigger when the spell id is secret")
+  assert(state.shell.shown == true, "a secret spell id should not prevent the active bloodlust frame from showing")
+  assert(state.shell.icon and state.shell.icon.texture == "texture:2825", "a secret spell id should fall back to the default bloodlust texture")
+  assert(state.shell.cooldown.cooldownDuration == 40, "a secret spell id should still preserve the live aura expiration time")
 end

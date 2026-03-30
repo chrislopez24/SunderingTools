@@ -108,8 +108,29 @@ local function NormalizeName(value)
   return normalized
 end
 
+local function IsSecretValue(value)
+  return value ~= nil and issecretvalue ~= nil and issecretvalue(value)
+end
+
+local function SanitizeAuraNumber(value)
+  if type(value) ~= "number" or IsSecretValue(value) then
+    return nil
+  end
+
+  return value
+end
+
+local function SanitizeAuraAsset(value)
+  if IsSecretValue(value) then
+    return nil
+  end
+
+  return value
+end
+
 local function IsTrackedTriggerAura(spellID, normalizedName)
-  if type(spellID) == "number" then
+  spellID = SanitizeAuraNumber(spellID)
+  if spellID then
     for _, trackedSpellID in ipairs(BLOODLUST_AURA_IDS) do
       if trackedSpellID == spellID then
         return true
@@ -121,7 +142,8 @@ local function IsTrackedTriggerAura(spellID, normalizedName)
 end
 
 local function IsTrackedLockoutAura(spellID)
-  if type(spellID) ~= "number" then
+  spellID = SanitizeAuraNumber(spellID)
+  if not spellID then
     return false
   end
 
@@ -143,13 +165,29 @@ local function FindActiveTriggerAura()
         break
       end
 
-      if IsTrackedTriggerAura(aura.spellId, nil) then
-        return true, aura.expirationTime, aura
+      local spellID = SanitizeAuraNumber(aura.spellId)
+      local expirationTime = SanitizeAuraNumber(aura.expirationTime)
+      local icon = SanitizeAuraAsset(aura.icon or aura.iconFileID)
+
+      if IsTrackedTriggerAura(spellID, nil) then
+        return true, expirationTime, {
+          spellId = spellID,
+          name = SanitizeAuraAsset(aura.name),
+          icon = icon,
+          iconFileID = icon,
+          expirationTime = expirationTime,
+        }
       end
 
       local normalizedName = NormalizeName(aura.name)
       if IsTrackedTriggerAura(nil, normalizedName) then
-        return true, aura.expirationTime, aura
+        return true, expirationTime, {
+          spellId = spellID,
+          name = SanitizeAuraAsset(aura.name),
+          icon = icon,
+          iconFileID = icon,
+          expirationTime = expirationTime,
+        }
       end
 
       index = index + 1
@@ -162,6 +200,10 @@ local function FindActiveTriggerAura()
       if not name then
         break
       end
+
+      spellID = SanitizeAuraNumber(spellID)
+      expirationTime = SanitizeAuraNumber(expirationTime)
+      icon = SanitizeAuraAsset(icon)
 
       if IsTrackedTriggerAura(spellID, nil) then
         return true, expirationTime, {
@@ -206,7 +248,17 @@ local function FindActiveLockoutAura()
   for _, spellID in ipairs(LOCKOUT_AURA_IDS) do
     local aura = GetPlayerAuraBySpellID(spellID)
     if aura then
-      return true, aura.expirationTime, aura, aura.duration
+      local expirationTime = SanitizeAuraNumber(aura.expirationTime)
+      local duration = SanitizeAuraNumber(aura.duration)
+      local icon = SanitizeAuraAsset(aura.icon or aura.iconFileID)
+      return true, expirationTime, {
+        spellId = spellID,
+        name = SanitizeAuraAsset(aura.name),
+        icon = icon,
+        iconFileID = icon,
+        expirationTime = expirationTime,
+        duration = duration,
+      }, duration
     end
   end
 
@@ -216,6 +268,11 @@ local function FindActiveLockoutAura()
       if not name then
         break
       end
+
+      spellID = SanitizeAuraNumber(spellID)
+      duration = SanitizeAuraNumber(duration)
+      expirationTime = SanitizeAuraNumber(expirationTime)
+      icon = SanitizeAuraAsset(icon)
 
       if IsTrackedLockoutAura(spellID) then
         return true, expirationTime, {
@@ -240,7 +297,9 @@ end
 local function GetCurrentBloodlustIcon()
   local hasAura, _, aura = FindActiveTriggerAura()
   if hasAura and aura then
-    return aura.icon or aura.iconFileID or (C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(aura.spellId or DEFAULT_BL_SPELL_ID))
+    local icon = SanitizeAuraAsset(aura.icon or aura.iconFileID)
+    local spellID = SanitizeAuraNumber(aura.spellId) or DEFAULT_BL_SPELL_ID
+    return icon or (C_Spell and C_Spell.GetSpellTexture and C_Spell.GetSpellTexture(spellID))
   end
 
   if C_Spell and C_Spell.GetSpellTexture then
