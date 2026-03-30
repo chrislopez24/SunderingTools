@@ -709,7 +709,6 @@ end
 
 function module:Stop()
   StopEffect()
-  RefreshAuraState()
 end
 
 function module:SetEditMode(enabled)

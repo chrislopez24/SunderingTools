@@ -442,3 +442,22 @@ do
   assert(state.shell.icon and state.shell.icon.texture == "texture:2825", "a secret spell id should fall back to the default bloodlust texture")
   assert(state.shell.cooldown.cooldownDuration == 40, "a secret spell id should still preserve the live aura expiration time")
 end
+
+do
+  local state = loadModule()
+  state.helpfulAuras[1] = {
+    spellId = 80353,
+    name = "Time Warp",
+    expirationTime = 140,
+    icon = "timewarp",
+  }
+
+  state.onEvent(nil, "PLAYER_LOGIN")
+  assert(#state.soundCalls == 1, "active bloodlust should start exactly one sound playback before stop verification")
+
+  state.module:Stop()
+
+  assert(#state.stoppedSounds == 1, "Stop Sound should stop the current playback handle")
+  assert(#state.soundCalls == 1, "Stop Sound should not immediately restart the active bloodlust sound")
+  assert(state.shell.shown == false, "Stop Sound should hide the tracker until a new aura event reactivates it")
+end
