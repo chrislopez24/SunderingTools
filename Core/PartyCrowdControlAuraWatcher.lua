@@ -29,8 +29,11 @@ local function copyAura(aura, now, isSecretValue)
     sourceUnit = nil
   end
 
-  local expirationTime = sanitizeAuraNumber(aura.expirationTime, isSecretValue) or 0
-  local remaining = expirationTime > 0 and math.max(0, expirationTime - now) or 0
+  local expirationTime = sanitizeAuraNumber(aura.expirationTime, isSecretValue)
+  local remaining = nil
+  if expirationTime and expirationTime > 0 then
+    remaining = math.max(0, expirationTime - now)
+  end
 
   return {
     auraInstanceID = aura.auraInstanceID,
@@ -42,13 +45,12 @@ local function copyAura(aura, now, isSecretValue)
   }
 end
 
-local function payloadChanged(previous, current)
+local function stablePayloadChanged(previous, current)
   return previous == nil
     or previous.auraInstanceID ~= current.auraInstanceID
     or previous.unitToken ~= current.unitToken
     or previous.spellID ~= current.spellID
     or previous.sourceUnit ~= current.sourceUnit
-    or previous.remaining ~= current.remaining
     or previous.isCrowdControl ~= current.isCrowdControl
 end
 
@@ -112,10 +114,8 @@ function Watcher:ProcessAuraSnapshot(unitToken, auras)
   for auraInstanceID, payload in pairs(current) do
     if not previous[auraInstanceID] then
       self:Emit("CC_APPLIED", payload)
-    elseif payloadChanged(previous[auraInstanceID], payload) then
+    elseif stablePayloadChanged(previous[auraInstanceID], payload) then
       self:Emit("CC_UPDATED", payload)
-    else
-      current[auraInstanceID] = previous[auraInstanceID]
     end
   end
 

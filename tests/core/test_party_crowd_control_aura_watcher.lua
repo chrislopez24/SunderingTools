@@ -74,7 +74,7 @@ do
 
   assert(ok, "secret expiration time should not error: " .. tostring(err))
   assert(#events == 1, "secret expiration snapshot should still emit apply event")
-  assert(events[1].payload.remaining == 0, "secret expiration time should degrade to zero remaining")
+  assert(events[1].payload.remaining == nil, "secret expiration time should preserve unknown remaining state")
   assert(events[1].payload.isCrowdControl == true, "secret classification should remain true")
 end
 
@@ -93,6 +93,48 @@ do
   watcher:ProcessAuraSnapshot("nameplate1", snapshot)
 
   assert(#events == 1, "unchanged snapshot should not emit noisy cc updates")
+end
+
+do
+  local now = 100
+  local events = {}
+  local watcher = Watcher.New({
+    getTime = function() return now end,
+    isSecretValue = function(value)
+      return value == "__SECRET__" or value == "__SECRET_CC__"
+    end,
+    isCrowdControl = function(aura)
+      if aura.spellId == 118 then
+        return true
+      end
+
+      if aura.spellId == "__SECRET__" then
+        return "__SECRET_CC__"
+      end
+
+      return false
+    end,
+  })
+
+  watcher:RegisterCallback(function(event, payload)
+    events[#events + 1] = { event = event, payload = payload }
+  end)
+
+  local snapshot = {
+    {
+      auraInstanceID = 15,
+      spellId = 118,
+      sourceUnit = "party1",
+      expirationTime = 108,
+    },
+  }
+
+  watcher:ProcessAuraSnapshot("nameplate1", snapshot)
+  now = 101
+  watcher:ProcessAuraSnapshot("nameplate1", snapshot)
+
+  assert(#events == 1, "time-only remaining drift should not emit cc updates")
+  assert(watcher.activeByUnit.nameplate1[15].remaining == 7, "watcher should still refresh stored remaining state")
 end
 
 do
