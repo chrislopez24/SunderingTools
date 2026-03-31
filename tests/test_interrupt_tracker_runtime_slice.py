@@ -120,7 +120,8 @@ def test_interrupt_tracker_registers_party_and_pet_watchers_without_party_spell_
     assert 'RegisterUnitEvent("UNIT_SPELLCAST_SUCCEEDED", petUnit)' in source
     assert "HandlePartyWatcher(unit)" in source
     assert "CanRecordWatcherTimestamp(ownerUnit)" in source
-    assert "runtime.recentPartyCasts[shortName] = GetTime()" in source
+    assert "runtime.recentPartyCasts[shortName] = observedAt" in source
+    assert "runtime.engine:RecordPartyCast(ownerUnit, observedAt)" in source
 
     event_start = source.index('elseif event == "UNIT_SPELLCAST_SUCCEEDED" then')
     event_end = source.index('    elseif event == "CHAT_MSG_ADDON" then', event_start)
@@ -133,12 +134,13 @@ def test_interrupt_tracker_emits_debug_logs_for_party_cast_and_correlation_paths
     source = read("Modules/InterruptTracker.lua")
 
     assert 'addon:DebugLog("int", "party cast", shortName)' in source
-    assert 'addon:DebugLog("int", "corr", bestName, "delta", string.format("%.3f", bestDelta))' in source
+    assert 'addon:DebugLog("int", "corr", resolvedName, "delta", string.format("%.3f", now - (applied.startTime or now)))' in source
     assert 'addon:DebugLog("int", "corr", "self", "delta", string.format("%.3f", selfDelta))' in source
     assert 'local sawRecentInterruptCandidate = selfDelta < 1.5' in source
     assert "if delta <= 1.5 then" in source
     assert 'elseif sawRecentInterruptCandidate then' in source
     assert 'addon:DebugLog("int", "corr", "miss")' in source
+    assert 'runtime.engine:ResolveInterruptWindow(now, {' in source
 
 
 def test_interrupt_tracker_deduplicates_self_correlation_events_before_consuming_timestamp():
@@ -203,7 +205,7 @@ def test_interrupt_tracker_registers_kryos_style_enemy_watchers_for_interrupt_co
 
     assert 'local npUnit = "nameplate" .. i' in source
     assert 'RegisterUnitEvent("UNIT_SPELLCAST_INTERRUPTED", npUnit)' in source
-    assert "runtime.lastCorrName = bestName" in source
+    assert "runtime.lastCorrName = resolvedName" in source
     assert "runtime.lastSelfInterruptTime > 0" in source
 
 

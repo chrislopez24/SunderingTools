@@ -109,6 +109,7 @@ runtime = {
       return TrackingRules.MatchRaidDefensive(unitContext, tracked, measuredDuration, evidence)
     end,
   }),
+  lastSelfStateSyncAt = 0,
 }
 local localTalentRanks = {}
 local localTalentConfigID = nil
@@ -540,6 +541,7 @@ local function SendCurrentSelfState()
     return
   end
 
+  local sentState = false
   for _, entry in ipairs(runtime.engine:GetEntriesByKind("RAID_DEF")) do
     if entry.playerGUID == playerGUID then
       local remaining = GetEntryRemaining(entry)
@@ -551,9 +553,27 @@ local function SendCurrentSelfState()
           charges = entry.charges or 1,
           remaining = remaining,
         })
+        sentState = true
       end
     end
   end
+
+  if sentState then
+    runtime.lastSelfStateSyncAt = GetTime()
+  end
+end
+
+local function MaybeBroadcastSelfState()
+  if not db or not db.enabled or not IsInGroup() then
+    return
+  end
+
+  local now = GetTime()
+  if runtime.lastSelfStateSyncAt > 0 and (now - runtime.lastSelfStateSyncAt) < 4.5 then
+    return
+  end
+
+  SendCurrentSelfState()
 end
 
 local function AnnouncePresence()
@@ -1559,6 +1579,10 @@ local function RefreshActiveCooldownBars()
     ReLayout()
   end
 
+  if anyCooling then
+    MaybeBroadcastSelfState()
+  end
+
   if not anyCooling and trackerTicker then
     trackerTicker:Cancel()
     trackerTicker = nil
@@ -1753,6 +1777,7 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
     runtime.engine:Reset()
     runtime.inference:Reset()
     runtime.evidence:Reset()
+    runtime.lastSelfStateSyncAt = 0
     RefreshRuntimeRoster()
     RefreshWatcherRoster()
 
@@ -1769,6 +1794,7 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
     runtime.engine:Reset()
     runtime.inference:Reset()
     runtime.evidence:Reset()
+    runtime.lastSelfStateSyncAt = 0
     RefreshRuntimeRoster()
     RefreshWatcherRoster()
 
@@ -1842,6 +1868,7 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
           charges = trackedSpell.charges or 1,
           remaining = trackedSpell.cd,
         })
+        runtime.lastSelfStateSyncAt = now
       end
       UpdatePartyData()
     end

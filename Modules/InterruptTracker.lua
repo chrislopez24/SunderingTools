@@ -107,6 +107,7 @@ local runtime = {
     partyManifests = {},
     noInterruptPlayers = {},
     recentPartyCasts = {},
+    lastSelfStateSyncAt = 0,
 }
 local CHANNEL_MIN_DURATION = 1.0
 
@@ -829,6 +830,7 @@ SendCurrentSelfState = function()
         return
     end
 
+    local sentState = false
     for _, entry in ipairs(runtime.engine:GetEntriesByKind("INT")) do
         if entry.playerGUID == playerGUID then
             local remaining = GetEntryRemaining(entry)
@@ -838,9 +840,27 @@ SendCurrentSelfState = function()
                     cd = entry.baseCd or entry.cd or 0,
                     remaining = remaining,
                 })
+                sentState = true
             end
         end
     end
+
+    if sentState then
+        runtime.lastSelfStateSyncAt = GetTime()
+    end
+end
+
+local function MaybeBroadcastSelfState()
+    if not db or not db.enabled or not IsInGroup() then
+        return
+    end
+
+    local now = GetTime()
+    if runtime.lastSelfStateSyncAt > 0 and (now - runtime.lastSelfStateSyncAt) < 4.5 then
+        return
+    end
+
+    SendCurrentSelfState()
 end
 
 local function HandleSyncHelloMessage(payload, sender)
@@ -907,9 +927,6 @@ end
 
 local function HandleEnemyInterrupted()
     local now = GetTime()
-    local bestName = nil
-    local bestDelta = 999
-    local staleNames = {}
     local selfDelta = runtime.lastSelfInterruptTime > 0 and (now - runtime.lastSelfInterruptTime) or 999
     local sawRecentInterruptCandidate = selfDelta < 1.5
 
@@ -919,63 +936,35 @@ local function HandleEnemyInterrupted()
             sawRecentInterruptCandidate = true
         end
         if delta > 0.5 then
-            staleNames[#staleNames + 1] = name
-        elseif delta < bestDelta then
-            if bestName and (bestDelta - delta) < 0.05 then
-                local bestCdEnd = (runtime.partyUsers[bestName] and runtime.partyUsers[bestName].cdEnd) or 0
-                local contenderCdEnd = (runtime.partyUsers[name] and runtime.partyUsers[name].cdEnd) or 0
-                if contenderCdEnd > bestCdEnd then
-                    bestName = name
-                    bestDelta = delta
-                end
-            else
-                bestName = name
-                bestDelta = delta
-            end
+            runtime.recentPartyCasts[name] = nil
         end
     end
 
-    for _, name in ipairs(staleNames) do
-        runtime.recentPartyCasts[name] = nil
-    end
+    local applied = runtime.engine:ResolveInterruptWindow(now, {
+        windowSize = 0.5,
+        selfObservedAt = runtime.lastSelfInterruptTime > 0 and runtime.lastSelfInterruptTime or nil,
+        selfWinsTies = true,
+        consumeSuppressed = true,
+    })
 
-    if selfDelta < 0.5 and selfDelta <= bestDelta then
-        bestName = nil
-        bestDelta = selfDelta
-    end
+    if applied then
+        local resolvedName = applied.playerName or ShortName(UnitName(applied.unitToken))
+        if resolvedName and resolvedName ~= "" then
+            runtime.recentPartyCasts[resolvedName] = nil
+        end
 
-    if bestName and bestDelta < 0.5 then
-        runtime.recentPartyCasts[bestName] = nil
-        if runtime.lastCorrName == bestName and (now - runtime.lastCorrTime) < 0.2 then
+        if runtime.lastCorrName == resolvedName and (now - runtime.lastCorrTime) < 0.2 then
             return
         end
 
-        runtime.lastCorrName = bestName
+        runtime.lastCorrName = resolvedName
         runtime.lastCorrTime = now
 
-        local user = runtime.partyUsers[bestName]
-        if not user then
-            local unit = FindGroupUnitByShortName(bestName)
-            if unit then
-                RegisterRuntimeInterrupt(unit, nil, nil, {
-                    auto = true,
-                    source = "auto",
-                })
-                user = runtime.partyUsers[bestName]
-            end
+        if resolvedName and resolvedName ~= "" then
+            addon:DebugLog("int", "corr", resolvedName, "delta", string.format("%.3f", now - (applied.startTime or now)))
         end
 
-        if user and user.guid and user.spellID and (user.baseCd or 0) > 0 then
-            addon:DebugLog("int", "corr", bestName, "delta", string.format("%.3f", bestDelta))
-            local applied = runtime.engine:ApplyCorrelatedCast(user.guid, user.spellID, now, now + user.baseCd)
-            if applied then
-                applied.playerName = bestName
-                applied.classToken = user.class
-                applied.role = user.role
-                applied.specID = user.specID
-                ApplyRuntimeCooldownEntry(applied, true)
-            end
-        end
+        ApplyRuntimeCooldownEntry(applied, true)
     elseif selfDelta < 1.5 then
         if runtime.lastCorrName == "self" and (now - runtime.lastCorrTime) < 0.2 then
             return
@@ -1059,9 +1048,11 @@ local function HandlePartyWatcher(ownerUnit)
         return
     end
 
+    local observedAt = GetTime()
     local shortName = ShortName(UnitName(ownerUnit))
     if shortName and shortName ~= "" then
-        runtime.recentPartyCasts[shortName] = GetTime()
+        runtime.recentPartyCasts[shortName] = observedAt
+        runtime.engine:RecordPartyCast(ownerUnit, observedAt)
         addon:DebugLog("int", "party cast", shortName)
     end
 end
@@ -1760,6 +1751,10 @@ local function RefreshActiveCooldownBars()
         ReLayout()
     end
 
+    if anyCooling then
+        MaybeBroadcastSelfState()
+    end
+
     if not anyCooling and trackerTicker then
         trackerTicker:Cancel()
         trackerTicker = nil
@@ -2137,6 +2132,7 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         runtime.lastCorrName = nil
         runtime.lastCorrTime = 0
         runtime.lastHelloAt = 0
+        runtime.lastSelfStateSyncAt = 0
         addon:DebugLog("int", "reset runtime", "PLAYER_ENTERING_WORLD")
 
         AfterDelay(0.3, function()
@@ -2165,6 +2161,7 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         wipe(cooldownState)
         runtime.engine:Reset()
         runtime.lastHelloAt = 0
+        runtime.lastSelfStateSyncAt = 0
         addon:DebugLog("int", "reset runtime", "CHALLENGE_MODE_START")
         AfterDelay(0.5, function()
             RegisterPartyWatchers()
@@ -2240,6 +2237,7 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
                         cd = cooldown,
                         remaining = cooldown,
                     })
+                    runtime.lastSelfStateSyncAt = now
                 end
             end
 

@@ -45,8 +45,10 @@ local function loadTracker(moduleDB, roster)
   local createdFrames = {}
   local sentMessages = {}
   local delayedCallbacks = {}
+  local activeTickers = {}
   local auraBuckets = {}
   local durationByAuraInstanceID = {}
+  local now = 100
 
   local function newUiObject(parent)
     local object = {
@@ -264,6 +266,20 @@ local function loadTracker(moduleDB, roster)
     After = function(_, callback)
       delayedCallbacks[#delayedCallbacks + 1] = callback
     end,
+    NewTicker = function(interval, callback)
+      local ticker = {
+        interval = interval,
+        callback = callback,
+        cancelled = false,
+      }
+
+      function ticker:Cancel()
+        self.cancelled = true
+      end
+
+      activeTickers[#activeTickers + 1] = ticker
+      return ticker
+    end,
   }
   _G.C_ChatInfo = {
     RegisterAddonMessagePrefix = function()
@@ -321,7 +337,7 @@ local function loadTracker(moduleDB, roster)
     return false
   end
   _G.GetTime = function()
-    return 100
+    return now
   end
   _G.Ambiguate = function(name)
     return string.match(name or "", "^([^%-]+)") or name
@@ -456,6 +472,14 @@ local function loadTracker(moduleDB, roster)
     sentMessages = sentMessages,
     auraBuckets = auraBuckets,
     durationByAuraInstanceID = durationByAuraInstanceID,
+    setTime = function(value)
+      now = value
+    end,
+    clearMessages = function()
+      for index = #sentMessages, 1, -1 do
+        sentMessages[index] = nil
+      end
+    end,
     flushTimers = function()
       while #delayedCallbacks > 0 do
         local callbacks = delayedCallbacks
@@ -464,6 +488,13 @@ local function loadTracker(moduleDB, roster)
           if callback then
             callback()
           end
+        end
+      end
+    end,
+    tickAll = function()
+      for _, ticker in ipairs(activeTickers) do
+        if not ticker.cancelled and ticker.callback then
+          ticker.callback()
         end
       end
     end,
@@ -793,4 +824,95 @@ do
   assert(syncedState.kind == "RAID_DEF", "raid defensive self casts should broadcast the RAID_DEF kind")
   assert(syncedState.cd == 180, "raid defensive self casts should sync the locally reduced Anti-Magic Zone cooldown")
   assert(syncedState.remaining == 180, "raid defensive self casts should sync the locally reduced remaining cooldown for Anti-Magic Zone")
+end
+
+do
+  local state = loadTracker({
+    enabled = true,
+    syncEnabled = true,
+  }, {
+    _group = true,
+    player = {
+      guid = "player-guid",
+      name = "Player-Realm",
+      classToken = "DEATHKNIGHT",
+      specID = 252,
+      knownSpells = {
+        [51052] = true,
+      },
+    },
+  })
+
+  state.onEvent(nil, "PLAYER_ENTERING_WORLD")
+  state.flushTimers()
+  state.clearMessages()
+
+  state.setTime(100)
+  state.onEvent(nil, "UNIT_SPELLCAST_SUCCEEDED", "player", nil, 51052)
+  local initialSyncCount = 0
+  for _, sent in ipairs(state.sentMessages) do
+    local messageType = Sync.Decode(sent.message)
+    if messageType == "DEF_STATE" then
+      initialSyncCount = initialSyncCount + 1
+    end
+  end
+
+  state.setTime(105)
+  state.tickAll()
+
+  local syncCountAfterTick = 0
+  for _, sent in ipairs(state.sentMessages) do
+    local messageType = Sync.Decode(sent.message)
+    if messageType == "DEF_STATE" then
+      syncCountAfterTick = syncCountAfterTick + 1
+    end
+  end
+
+  assert(syncCountAfterTick > initialSyncCount, "active self raid defensives should periodically rebroadcast DEF_STATE for reliable bar sync")
+end
+
+do
+  local state = loadTracker({
+    enabled = true,
+    syncEnabled = true,
+  }, {
+    _group = true,
+    player = {
+      guid = "player-guid",
+      name = "Player-Realm",
+      classToken = "DEATHKNIGHT",
+      specID = 252,
+      knownSpells = {
+        [51052] = true,
+      },
+    },
+    party1 = {
+      guid = "party-guid",
+      name = "Other-Realm",
+      classToken = "MAGE",
+      specID = 62,
+    },
+  })
+
+  state.onEvent(nil, "PLAYER_ENTERING_WORLD")
+  state.flushTimers()
+  state.clearMessages()
+
+  state.setTime(100)
+  state.onEvent(nil, "UNIT_SPELLCAST_SUCCEEDED", "player", nil, 51052)
+  state.clearMessages()
+
+  state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "HELLO:MAGE:62", nil, "Other-Realm")
+
+  local replayedState
+  for _, sent in ipairs(state.sentMessages) do
+    local messageType, payload = Sync.Decode(sent.message)
+    if messageType == "DEF_STATE" and payload.spellID == 51052 then
+      replayedState = payload
+    end
+  end
+
+  assert(type(replayedState) == "table", "peer HELLO messages should trigger replay of the current self raid defensive cooldown")
+  assert(replayedState.kind == "RAID_DEF", "raid defensive replay after HELLO should stay in the raid defensive sync lane")
+  assert(replayedState.remaining == replayedState.cd, "raid defensive replay after HELLO should carry the current remaining cooldown for the active spell")
 end
