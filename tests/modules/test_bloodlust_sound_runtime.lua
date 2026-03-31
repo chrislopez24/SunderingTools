@@ -381,6 +381,22 @@ end
 do
   local state = loadModule()
   state.helpfulAuras[1] = {
+    spellId = 80353,
+    name = "Time Warp",
+    expirationTime = 130,
+    icon = "timewarp",
+  }
+
+  state.onEvent(nil, "PLAYER_ENTERING_WORLD")
+
+  assert(#state.soundCalls == 1, "an active bloodlust buff should resume when entering the world with the aura already active")
+  assert(state.shell.shown == true, "entering the world with an active bloodlust buff should show the tracker")
+  assert(state.shell.cooldown.cooldownDuration == 30, "entering the world with an active bloodlust buff should preserve the live aura duration")
+end
+
+do
+  local state = loadModule()
+  state.helpfulAuras[1] = {
     spellId = 999999,
     name = "Drums of Fury",
     expirationTime = 118,

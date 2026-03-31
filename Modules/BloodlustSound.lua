@@ -932,6 +932,7 @@ end
 local eventFrame = CreateFrame("Frame")
 
 eventFrame:RegisterEvent("PLAYER_LOGIN")
+eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 eventFrame:RegisterEvent("PLAYER_REGEN_DISABLED")
 eventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 eventFrame:RegisterEvent("UNIT_AURA")
@@ -945,6 +946,17 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
       if hasBloodlust then
         addon:DebugLog("bloodlust", "resume active effect", expiration)
       end
+      RefreshAuraState()
+    end
+    return
+  end
+
+  if event == "PLAYER_ENTERING_WORLD" then
+    if not db then
+      db = addon.db and addon.db.BloodlustSound
+    end
+    if db and db.enabled then
+      EnsureFrame()
       RefreshAuraState()
     end
     return
