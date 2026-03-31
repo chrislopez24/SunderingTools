@@ -17,6 +17,10 @@ local Engine = assert(
   _G.SunderingToolsCombatTrackEngine,
   "SunderingToolsCombatTrackEngine must load before PartyDefensiveTracker.lua"
 )
+local Fallback = assert(
+  _G.SunderingToolsPartyDefensiveAuraFallback,
+  "SunderingToolsPartyDefensiveAuraFallback must load before PartyDefensiveTracker.lua"
+)
 
 local module = {
   key = "PartyDefensiveTracker",
@@ -59,6 +63,12 @@ local ATTACHMENT_POINT_OPTIONS = {
 local runtime = {
   engine = Engine.New(),
   partyUsers = {},
+  fallback = Fallback.New({
+    getTime = GetTime,
+    resolveSpell = function(spellID)
+      return SpellDB.ResolveDefensiveSpell(spellID)
+    end,
+  }),
 }
 local localTalentRanks = {}
 local localTalentConfigID = nil
@@ -319,6 +329,27 @@ local function BuildSpellSet(spellIDs)
     spellSet[spellID] = true
   end
   return spellSet
+end
+
+local function BuildDefensiveAuraSnapshot(unitToken)
+  local snapshot = {}
+  local seen = {}
+  local filters = {
+    "HELPFUL|BIG_DEFENSIVE",
+    "HELPFUL|EXTERNAL_DEFENSIVE",
+  }
+
+  for _, filter in ipairs(filters) do
+    local auras = C_UnitAuras and C_UnitAuras.GetUnitAuras and C_UnitAuras.GetUnitAuras(unitToken, filter)
+    for _, aura in ipairs(auras or {}) do
+      if aura and aura.auraInstanceID and not seen[aura.auraInstanceID] then
+        seen[aura.auraInstanceID] = true
+        snapshot[#snapshot + 1] = aura
+      end
+    end
+  end
+
+  return snapshot
 end
 
 local function GetEntryRemaining(entry, now)
@@ -880,6 +911,86 @@ local function RegisterUserManifest(user, spellIDs)
   RegisterExpectedDefensiveEntries(user.playerGUID, user.playerName, user.classToken, user.spellIDs, user.unitToken, user.specID)
 end
 
+local function RefreshFallbackSnapshot(unitToken)
+  if not unitToken or unitToken == "player" then
+    return
+  end
+
+  if not db or not db.enabled or not UnitExists(unitToken) then
+    runtime.fallback:RemoveUnit(unitToken)
+    return
+  end
+
+  runtime.fallback:ProcessAuraSnapshot(unitToken, BuildDefensiveAuraSnapshot(unitToken))
+end
+
+local function RefreshFallbackRoster()
+  for _, unit in ipairs(BuildRuntimeUnits()) do
+    if unit ~= "player" then
+      RefreshFallbackSnapshot(unit)
+    end
+  end
+end
+
+local function ApplyDefensiveFallback(payload)
+  local unit = payload and payload.ownerUnit
+  local spellID = payload and payload.spellID
+  if not unit or unit == "player" or not UnitExists(unit) or type(spellID) ~= "number" then
+    return
+  end
+
+  local userKey = ShortName(UnitName(unit))
+  local user = userKey and runtime.partyUsers[userKey] or nil
+  if not user or not user.playerGUID then
+    return
+  end
+
+  local trackedSpell = SpellDB.ResolveDefensiveSpell(spellID, user.specID)
+  if not trackedSpell or trackedSpell.kind ~= "DEF" then
+    return
+  end
+
+  local spellSet = BuildSpellSet(user.spellIDs)
+  if IsStrictSyncMode() and not spellSet[spellID] then
+    return
+  end
+  if not IsStrictSyncMode() and not spellSet[spellID] then
+    user.spellIDs[#user.spellIDs + 1] = spellID
+  end
+
+  local runtimeKey = BuildRuntimeKey(user.playerGUID, spellID)
+  local existing = runtime.engine:GetEntry(runtimeKey)
+  local readyAt = payload.readyAt or ((payload.startTime or GetTime()) + (payload.baseCd or trackedSpell.cd))
+  if existing then
+    if existing.source == "self" or existing.source == "sync" then
+      return
+    end
+    if (existing.readyAt or 0) >= readyAt then
+      return
+    end
+  end
+
+  local applied = runtime.engine:UpsertEntry({
+    key = runtimeKey,
+    playerGUID = user.playerGUID,
+    playerName = user.playerName,
+    classToken = user.classToken or trackedSpell.classToken,
+    unitToken = user.unitToken or unit,
+    spellID = spellID,
+    source = payload.source or "aura",
+    kind = "DEF",
+    startTime = payload.startTime or GetTime(),
+    readyAt = readyAt,
+    baseCd = payload.baseCd or trackedSpell.cd,
+    cd = payload.baseCd or trackedSpell.cd,
+    charges = trackedSpell.charges or 1,
+  })
+
+  if applied then
+    UpdateAttachments()
+  end
+end
+
 PruneRuntimeEntriesForUser = function(playerGUID, spellIDs)
   if not playerGUID then
     return
@@ -1143,6 +1254,8 @@ function module:SetEditMode(enabled)
   UpdateAttachments()
 end
 
+module.applyDefensiveFallback = ApplyDefensiveFallback
+
 function module:ResetPosition(moduleDB)
   moduleDB = moduleDB or db or (addon.db and addon.db.modules and addon.db.modules.PartyDefensiveTracker)
   if not moduleDB then
@@ -1300,6 +1413,7 @@ eventFrame:RegisterEvent("PLAYER_TALENT_UPDATE")
 eventFrame:RegisterEvent("SPELLS_CHANGED")
 eventFrame:RegisterEvent("TRAIT_CONFIG_UPDATED")
 eventFrame:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
+eventFrame:RegisterEvent("UNIT_AURA")
 eventFrame:RegisterEvent("CHAT_MSG_ADDON")
 
 eventFrame:SetScript("OnEvent", function(_, event, ...)
@@ -1311,13 +1425,16 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
 
     if db and db.enabled then
       RefreshRuntimeRoster()
+      RefreshFallbackRoster()
       UpdateAttachments()
     end
 
   elseif event == "PLAYER_ENTERING_WORLD" then
     EnsureModuleDB()
     runtime.engine:Reset()
+    runtime.fallback:Reset()
     RefreshRuntimeRoster()
+    RefreshFallbackRoster()
     HookCompactPartyFrame()
     UpdateAttachments()
     SchedulePresenceAnnounce()
@@ -1325,7 +1442,9 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
   elseif event == "CHALLENGE_MODE_START" then
     EnsureModuleDB()
     runtime.engine:Reset()
+    runtime.fallback:Reset()
     RefreshRuntimeRoster()
+    RefreshFallbackRoster()
     HookCompactPartyFrame()
     UpdateAttachments()
     SchedulePresenceAnnounce()
@@ -1333,6 +1452,7 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
   elseif event == "GROUP_ROSTER_UPDATE" then
     EnsureModuleDB()
     RefreshRuntimeRoster()
+    RefreshFallbackRoster()
     HookCompactPartyFrame()
     UpdateAttachments()
     SchedulePresenceAnnounce()
@@ -1341,6 +1461,7 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
     EnsureModuleDB()
     InvalidateLocalTalentCache()
     RefreshRuntimeRoster()
+    RefreshFallbackRoster()
     HookCompactPartyFrame()
     UpdateAttachments()
 
@@ -1383,6 +1504,14 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
       UpdateAttachments()
     end
 
+  elseif event == "UNIT_AURA" then
+    if not db or not db.enabled then
+      return
+    end
+
+    local unitToken = ...
+    RefreshFallbackSnapshot(unitToken)
+
   elseif event == "CHAT_MSG_ADDON" then
     local prefix, message, _, sender = ...
     if prefix ~= Sync.GetPrefix() then
@@ -1392,6 +1521,8 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
     HandleSyncMessage(message, sender)
   end
 end)
+
+runtime.fallback:RegisterCallback(ApplyDefensiveFallback)
 
 addon.PartyDefensiveTracker = module
 addon:RegisterModule(module)

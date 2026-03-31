@@ -47,6 +47,15 @@ def test_party_defensive_tracker_registers_sync_paths_and_preview_edit_mode():
     assert "function module:SetEditMode(enabled)" in source
 
 
+def test_party_defensive_tracker_registers_aura_fallback_runtime():
+    toc = read("SunderingTools.toc")
+    source = read("Modules/PartyDefensiveTracker.lua")
+
+    assert "Core\\PartyDefensiveAuraFallback.lua" in toc
+    assert "_G.SunderingToolsPartyDefensiveAuraFallback" in source
+    assert "module.applyDefensiveFallback = ApplyDefensiveFallback" in source
+
+
 def test_party_defensive_tracker_ignores_non_defensive_or_raid_defensive_sync_entries():
     source = read("Modules/PartyDefensiveTracker.lua")
 

@@ -14,6 +14,7 @@ Core\CombatTrackSync.lua
 Core\CombatTrackEngine.lua
 Core\PartyCrowdControlAuraWatcher.lua
 Core\PartyCrowdControlResolver.lua
+Core\PartyDefensiveAuraFallback.lua
 Core\FramePositioning.lua
 Core\TrackerFrame.lua
 
@@ -27,6 +28,7 @@ Modules\InterruptTrackerModel.lua
 Modules\InterruptTracker.lua
 Modules\CrowdControlTrackerModel.lua
 Modules\CrowdControlTracker.lua
+Modules\NameplateCrowdControl.lua
 Modules\PartyDefensiveTrackerModel.lua
 Modules\PartyDefensiveTracker.lua
 Modules\DefensiveRaidTrackerModel.lua

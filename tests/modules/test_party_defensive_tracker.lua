@@ -199,6 +199,7 @@ local function loadTracker(moduleDB, roster, compactPartyFrame)
   _G.SunderingToolsCombatTrackSpellDB = nil
   _G.SunderingToolsCombatTrackSync = nil
   _G.SunderingToolsCombatTrackEngine = nil
+  _G.SunderingToolsPartyDefensiveAuraFallback = nil
   _G.SunderingToolsPartyDefensiveTrackerModel = nil
   _G.CompactPartyFrame = compactPartyFrame
 
@@ -232,6 +233,7 @@ local function loadTracker(moduleDB, roster, compactPartyFrame)
   dofile("Core/CombatTrackSpellDB.lua")
   dofile("Core/CombatTrackSync.lua")
   dofile("Core/CombatTrackEngine.lua")
+  dofile("Core/PartyDefensiveAuraFallback.lua")
   dofile("Modules/PartyDefensiveTrackerModel.lua")
 
   _G.C_Timer = {
@@ -1017,4 +1019,47 @@ do
   local amsEntry = state.runtime.engine:GetEntry("player-guid:48707")
   assert(amsEntry ~= nil, "party defensive runtime should register Anti-Magic Shell for the local player")
   assert(amsEntry.baseCd == 40, "party defensive runtime should seed Anti-Magic Shell with the locally reduced Death Knight cooldown")
+end
+
+do
+  local compactPartyFrame = buildCompactPartyFrame()
+  compactPartyFrame.memberUnitFrames[1].unit = "party1"
+
+  local state = loadTracker({
+    enabled = true,
+    syncEnabled = true,
+    strictSyncMode = false,
+  }, {
+    _group = true,
+    party1 = {
+      guid = "other-guid",
+      name = "Other-Realm",
+      classToken = "DEATHKNIGHT",
+      specID = 252,
+    },
+  }, compactPartyFrame)
+
+  state.runtime.partyUsers.Other = {
+    key = "Other",
+    playerGUID = "other-guid",
+    playerName = "Other",
+    classToken = "DEATHKNIGHT",
+    specID = 252,
+    unitToken = "party1",
+    spellIDs = {},
+  }
+
+  state.addon.modules.PartyDefensiveTracker.applyDefensiveFallback({
+    ownerUnit = "party1",
+    spellID = 48707,
+    startTime = 300,
+    readyAt = 360,
+    source = "aura",
+    baseCd = 60,
+  })
+
+  assert(
+    state.runtime.engine:GetEntry("other-guid:48707") ~= nil,
+    "party defensive tracker should accept fallback state when sync is absent"
+  )
 end
