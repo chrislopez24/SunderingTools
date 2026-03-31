@@ -342,9 +342,10 @@ do
   state.onEvent(nil, "PLAYER_LOGIN")
 
   assert(state.shell.shown == true, "lockout state should keep the tracker visible")
-  assert(state.shell.statusText and state.shell.statusText.text == "LOCKOUT", "lockout state should label the tracker")
-  assert(state.shell.cooldown.cooldownDuration == 600, "lockout state should use the live debuff duration")
-  assert(state.shell.timerText.text == 600, "lockout state should show the remaining debuff time")
+  assert(state.shell.statusText and state.shell.statusText.text == "Sated: 10m", "lockout state should render aura name with compact timer text")
+  assert(state.shell.icon.shown == false, "lockout state should hide the debuff icon")
+  assert(state.shell.cooldown.shown == false, "lockout state should hide the cooldown swipe")
+  assert(state.shell.timerText.text == "", "lockout state should not use the active countdown text layer")
   assert(#state.soundCalls == 0, "lockout state should not play the bloodlust sound")
 
   state.auras[57724] = nil
@@ -415,6 +416,7 @@ do
   assert(#state.soundCalls == 1, "an active bloodlust buff should take priority over the lockout display")
   assert(state.shell.cooldown.cooldownDuration == 40, "active bloodlust should continue to drive the countdown while lockout is also present")
   assert(state.shell.statusText == nil or state.shell.statusText.shown == false, "active bloodlust should hide the lockout label while the buff is up")
+  assert(state.shell.icon and state.shell.icon.texture == "timewarp", "active bloodlust should keep the active aura icon even while lockout is also present")
 end
 
 do

@@ -17,10 +17,20 @@ local function sanitizeAuraNumber(value, isSecretValue)
   return value
 end
 
+local function sanitizeAuraAsset(value, isSecretValue)
+  if isSecretValue and value ~= nil and isSecretValue(value) then
+    return nil
+  end
+
+  return value
+end
+
 local function copyAura(aura, now, isSecretValue)
   local spellID = aura.spellId
   local sourceUnit = aura.sourceUnit
   local expirationTime = sanitizeAuraNumber(aura.expirationTime, isSecretValue)
+  local icon = sanitizeAuraAsset(aura.icon or aura.iconFileID, isSecretValue)
+  local name = sanitizeAuraAsset(aura.name, isSecretValue)
 
   if isSecretValue and spellID ~= nil and isSecretValue(spellID) then
     spellID = nil
@@ -39,6 +49,9 @@ local function copyAura(aura, now, isSecretValue)
     auraInstanceID = aura.auraInstanceID,
     unitToken = aura.unitToken,
     spellID = spellID,
+    name = name,
+    icon = icon,
+    iconFileID = icon,
     sourceUnit = sourceUnit,
     expirationTime = expirationTime,
     remaining = remaining,
@@ -51,6 +64,8 @@ local function stablePayloadChanged(previous, current)
     or previous.auraInstanceID ~= current.auraInstanceID
     or previous.unitToken ~= current.unitToken
     or previous.spellID ~= current.spellID
+    or previous.name ~= current.name
+    or previous.icon ~= current.icon
     or previous.sourceUnit ~= current.sourceUnit
     or previous.expirationTime ~= current.expirationTime
     or previous.isCrowdControl ~= current.isCrowdControl
@@ -103,6 +118,8 @@ function Watcher:ProcessAuraSnapshot(unitToken, auras)
         auraInstanceID = aura.auraInstanceID,
         unitToken = unitToken,
         spellId = aura.spellId,
+        name = aura.name,
+        icon = aura.icon or aura.iconFileID,
         sourceUnit = aura.sourceUnit,
         expirationTime = aura.expirationTime,
         isCrowdControl = true,

@@ -612,6 +612,8 @@ local function ShowReadyState()
     return
   end
 
+  displayFrame.icon:Show()
+  displayFrame.cooldown:Show()
   if displayFrame.cooldown then
     displayFrame.cooldown:SetCooldown(0, 0)
   end
@@ -636,13 +638,10 @@ local function ShowLockoutState(expirationTime, aura, duration)
     return
   end
 
-  local texture = aura and (aura.icon or aura.iconFileID)
-  if texture then
-    displayFrame.icon:SetTexture(texture)
-    displayFrame.icon:SetTexCoord(0.08, 0.92, 0.08, 0.92)
-  else
-    UpdateIconTexture()
-  end
+  displayFrame.icon:Hide()
+  displayFrame.cooldown:Hide()
+  displayFrame.cooldown:SetCooldown(0, 0)
+  SetTimerText("")
 
   local now = GetTime()
   local lockoutDuration = duration
@@ -654,10 +653,8 @@ local function ShowLockoutState(expirationTime, aura, duration)
     expirationTime = now + lockoutDuration
   end
 
-  local startTime = expirationTime - lockoutDuration
-  displayFrame.cooldown:SetCooldown(startTime, lockoutDuration)
-  SetStatusLayout("TOP", displayFrame, "BOTTOM", 0, -4, 13)
-  SetStatusText("LOCKOUT", 1, 0.85, 0.2)
+  local auraName = type(aura and aura.name) == "string" and aura.name or "Lockout"
+  SetStatusLayout("CENTER", displayFrame, "CENTER", 0, 0, 18)
 
   local function tick()
     local timeLeft = expirationTime - GetTime()
@@ -666,7 +663,7 @@ local function ShowLockoutState(expirationTime, aura, duration)
       return
     end
 
-    SetTimerText(math.ceil(timeLeft))
+    SetStatusText(string.format("%s: %s", auraName, Model.FormatCompactDuration(timeLeft)), 1, 0.85, 0.2)
   end
 
   tick()
@@ -693,6 +690,8 @@ local function PlayEffect(expirationTime, forcePlay)
   local displayFrame = EnsureFrame()
   if not displayFrame then return end
 
+  displayFrame.icon:Show()
+  displayFrame.cooldown:Show()
   UpdateIconTexture()
   SetStatusLayout("TOP", displayFrame, "BOTTOM", 0, -4, 13)
   SetStatusText(nil)

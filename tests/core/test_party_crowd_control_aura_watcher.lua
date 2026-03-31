@@ -51,11 +51,15 @@ do
       spellId = "__SECRET__",
       sourceUnit = "__SECRET__",
       expirationTime = 104,
+      icon = "polymorph-icon",
+      name = "Polymorph",
     },
   })
 
   assert(events[2].payload.spellID == nil, "secret spell ids should not be exposed")
   assert(events[2].payload.sourceUnit == nil, "secret source units should not be exposed")
+  assert(events[2].payload.icon == "polymorph-icon", "usable aura icons should survive secret spell id sanitization")
+  assert(events[2].payload.name == "Polymorph", "usable aura names should survive secret spell id sanitization")
   assert(events[2].payload.isCrowdControl == true, "classified crowd control should survive secret identity loss")
 end
 
