@@ -1,9 +1,9 @@
 local addon = _G.SunderingTools
 if not addon then return end
 
-local Watcher = assert(
-  _G.SunderingToolsPartyCrowdControlAuraWatcher,
-  "SunderingToolsPartyCrowdControlAuraWatcher must load before NameplateCrowdControl.lua"
+local WatcherModule = assert(
+  _G.SunderingToolsUnitAuraStateWatcher,
+  "SunderingToolsUnitAuraStateWatcher must load before NameplateCrowdControl.lua"
 )
 local Sync = assert(
   _G.SunderingToolsCombatTrackSync,
@@ -36,13 +36,7 @@ local SYNC_CORRELATION_WINDOW = 1.0
 local SYNC_RETENTION_WINDOW = 3.0
 
 local runtime = {
-  watcher = Watcher.New({
-    getTime = GetTime,
-    isSecretValue = _G.issecretvalue,
-    isCrowdControl = function(aura)
-      return aura and aura.isCrowdControl == true
-    end,
-  }),
+  watchers = {},
   activeByUnit = {},
   recentSyncs = {},
   correlatedAuras = {},
@@ -160,6 +154,67 @@ local function GetSpellIcon(spellID)
   end
 
   return FALLBACK_ICON
+end
+
+local function ResolveDurationRemaining(durationObject)
+  if type(durationObject) ~= "table" then
+    return nil
+  end
+
+  if type(durationObject.GetRemainingTime) == "function" then
+    local ok, remaining = pcall(durationObject.GetRemainingTime, durationObject)
+    if ok and type(remaining) == "number" and remaining >= 0 then
+      return remaining
+    end
+  end
+
+  if type(durationObject.GetExpirationTime) == "function" then
+    local ok, expirationTime = pcall(durationObject.GetExpirationTime, durationObject)
+    if ok and type(expirationTime) == "number" then
+      return math.max(0, expirationTime - GetTime())
+    end
+  end
+
+  return nil
+end
+
+local function BuildPayloadFromAura(unitToken, aura)
+  if type(aura) ~= "table" or not aura.AuraInstanceID then
+    return nil
+  end
+
+  local payload = {
+    auraInstanceID = aura.AuraInstanceID,
+    unitToken = unitToken,
+    spellID = aura.SpellId,
+    name = aura.SpellName,
+    icon = aura.SpellIcon,
+    iconFileID = aura.SpellIcon,
+    sourceUnit = aura.SourceUnit,
+    remaining = ResolveDurationRemaining(aura.DurationObject),
+  }
+
+  return EnsureCorrelationState(payload)
+end
+
+local function StoreWatcherState(unitToken, watcher)
+  local current = {}
+  local previous = runtime.activeByUnit[unitToken] or {}
+
+  for _, aura in ipairs(watcher:GetCcState() or {}) do
+    local payload = BuildPayloadFromAura(unitToken, aura)
+    if payload and payload.auraInstanceID then
+      current[payload.auraInstanceID] = payload
+    end
+  end
+
+  for auraInstanceID in pairs(previous) do
+    if not current[auraInstanceID] then
+      runtime.correlatedAuras[BuildAuraKey(unitToken, auraInstanceID)] = nil
+    end
+  end
+
+  runtime.activeByUnit[unitToken] = next(current) and current or nil
 end
 
 local function ResolvePayloadIcon(payload)
@@ -398,20 +453,6 @@ local function UpdateUnitFrame(unitToken)
   frame:Show()
 end
 
-local function BuildCrowdControlSnapshot(unitToken)
-  local snapshot = {}
-  local auras = C_UnitAuras and C_UnitAuras.GetUnitAuras and C_UnitAuras.GetUnitAuras(unitToken, "HARMFUL|CROWD_CONTROL")
-
-  for _, aura in ipairs(auras or {}) do
-    if aura and aura.auraInstanceID then
-      aura.isCrowdControl = true
-      snapshot[#snapshot + 1] = aura
-    end
-  end
-
-  return snapshot
-end
-
 local function UpdateInfoTouchesCrowdControl(unitToken, updateInfo)
   if not updateInfo or updateInfo.isFullUpdate then
     return true
@@ -434,7 +475,7 @@ local function UpdateInfoTouchesCrowdControl(unitToken, updateInfo)
     return true
   end
 
-  local active = runtime.watcher.activeByUnit[unitToken]
+  local active = runtime.activeByUnit[unitToken]
   for _, auraInstanceID in ipairs(updateInfo.removedAuraInstanceIDs or {}) do
     if active and active[auraInstanceID] then
       return true
@@ -444,29 +485,55 @@ local function UpdateInfoTouchesCrowdControl(unitToken, updateInfo)
   return false
 end
 
-local function RefreshUnit(unitToken)
+local function EnsureUnitWatcher(unitToken)
+  local watcher = runtime.watchers[unitToken]
+  if watcher then
+    return watcher
+  end
+
+  watcher = WatcherModule.New(unitToken, nil, { CC = true })
+  watcher:RegisterCallback(function(activeWatcher)
+    StoreWatcherState(unitToken, activeWatcher)
+    UpdateUnitFrame(unitToken)
+  end)
+  runtime.watchers[unitToken] = watcher
+  return watcher
+end
+
+local function RemoveUnitWatcher(unitToken)
+  local watcher = runtime.watchers[unitToken]
+  if watcher then
+    watcher:Dispose()
+    runtime.watchers[unitToken] = nil
+  end
+
+  runtime.activeByUnit[unitToken] = nil
+end
+
+local function RefreshUnit(unitToken, updateInfo)
   if not IsNameplateUnit(unitToken) then
     return
   end
 
   if not db or not db.enabled or not IsCurrentContextAllowed() or not UnitExists(unitToken) then
-    runtime.watcher:RemoveUnit(unitToken)
-    runtime.activeByUnit[unitToken] = nil
+    RemoveUnitWatcher(unitToken)
     HideUnitFrame(unitToken)
     return
   end
 
-  runtime.watcher:ProcessAuraSnapshot(unitToken, BuildCrowdControlSnapshot(unitToken))
+  local watcher = EnsureUnitWatcher(unitToken)
+  watcher:OnEvent("UNIT_AURA", unitToken, updateInfo or { isFullUpdate = true })
+  StoreWatcherState(unitToken, watcher)
+  UpdateUnitFrame(unitToken)
 end
 
 local function RefreshAllNameplates()
   for index = 1, 40 do
     local unitToken = "nameplate" .. index
     if UnitExists(unitToken) then
-      RefreshUnit(unitToken)
+      RefreshUnit(unitToken, { isFullUpdate = true })
     else
-      runtime.watcher:RemoveUnit(unitToken)
-      runtime.activeByUnit[unitToken] = nil
+      RemoveUnitWatcher(unitToken)
       HideUnitFrame(unitToken)
     end
   end
@@ -612,29 +679,6 @@ function module:onConfigChanged(_, moduleDB)
   RefreshAllNameplates()
 end
 
-runtime.watcher:RegisterCallback(function(event, payload)
-  if type(payload) ~= "table" or not payload.unitToken then
-    return
-  end
-
-  local unitToken = payload.unitToken
-  runtime.activeByUnit[unitToken] = runtime.activeByUnit[unitToken] or {}
-
-  if event == "CC_APPLIED" or event == "CC_UPDATED" then
-    RestoreCorrelationMatch(payload)
-    ResolveSynchronizedPayload(unitToken, payload)
-    runtime.activeByUnit[unitToken][payload.auraInstanceID] = payload
-  elseif event == "CC_REMOVED" then
-    runtime.correlatedAuras[BuildAuraKey(unitToken, payload.auraInstanceID)] = nil
-    runtime.activeByUnit[unitToken][payload.auraInstanceID] = nil
-    if not next(runtime.activeByUnit[unitToken]) then
-      runtime.activeByUnit[unitToken] = nil
-    end
-  end
-
-  UpdateUnitFrame(unitToken)
-end)
-
 local eventFrame = CreateFrame("Frame")
 eventFrame:RegisterEvent("PLAYER_LOGIN")
 eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
@@ -655,7 +699,7 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
   if event == "PLAYER_ENTERING_WORLD" then
     previewEnabled = false
     for unitToken in pairs(runtime.activeByUnit) do
-      runtime.watcher:RemoveUnit(unitToken)
+      RemoveUnitWatcher(unitToken)
       HideUnitFrame(unitToken)
     end
     wipe(runtime.activeByUnit)
@@ -668,14 +712,13 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
 
   if event == "NAME_PLATE_UNIT_ADDED" then
     local unitToken = ...
-    RefreshUnit(unitToken)
+    RefreshUnit(unitToken, { isFullUpdate = true })
     return
   end
 
   if event == "NAME_PLATE_UNIT_REMOVED" then
     local unitToken = ...
-    runtime.watcher:RemoveUnit(unitToken)
-    runtime.activeByUnit[unitToken] = nil
+    RemoveUnitWatcher(unitToken)
     HideUnitFrame(unitToken)
     return
   end
@@ -686,7 +729,7 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
       return
     end
 
-    RefreshUnit(unitToken)
+    RefreshUnit(unitToken, updateInfo)
     return
   end
 

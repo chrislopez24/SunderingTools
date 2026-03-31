@@ -8,12 +8,12 @@ def read(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
 
 
-def test_nameplate_crowd_control_runtime_slice_loads_party_cc_watcher_from_toc():
+def test_nameplate_crowd_control_runtime_slice_loads_unit_aura_state_watcher_from_toc():
     toc = read("SunderingTools.toc")
-    watcher_source = read("Core/PartyCrowdControlAuraWatcher.lua")
+    watcher_source = read("Core/UnitAuraStateWatcher.lua")
 
-    assert "Core\\PartyCrowdControlAuraWatcher.lua" in toc
-    assert "_G.SunderingToolsPartyCrowdControlAuraWatcher = Watcher" in watcher_source
+    assert "Core\\UnitAuraStateWatcher.lua" in toc
+    assert "_G.SunderingToolsUnitAuraStateWatcher = WatcherModule" in watcher_source
 
 
 def test_nameplate_crowd_control_module_is_loaded_from_toc():
@@ -22,14 +22,14 @@ def test_nameplate_crowd_control_module_is_loaded_from_toc():
     assert "Modules\\NameplateCrowdControl.lua" in toc
 
 
-def test_nameplate_crowd_control_module_depends_on_party_cc_watcher():
+def test_nameplate_crowd_control_module_depends_on_unit_aura_state_watcher():
     source = read("Modules/NameplateCrowdControl.lua")
 
-    assert "SunderingToolsPartyCrowdControlAuraWatcher" in source
+    assert "SunderingToolsUnitAuraStateWatcher" in source
     assert "SunderingToolsCombatTrackSync" in source
     assert "HARMFUL|CROWD_CONTROL" in source
-    assert "CC_APPLIED" in source
-    assert "CC_REMOVED" in source
+    assert "runtime.watchers" in source
+    assert "watcher:GetCcState()" in source
     assert "payload.icon" in source
     assert "frame.icon:SetTexture(ResolvePayloadIcon(payload))" in source
 
@@ -53,6 +53,7 @@ def test_nameplate_crowd_control_supports_sync_enrichment_for_unknown_cc_auras()
     source = read("Modules/NameplateCrowdControl.lua")
 
     assert 'eventFrame:RegisterEvent("CHAT_MSG_ADDON")' in source
+    assert 'eventFrame:RegisterEvent("UNIT_AURA")' in source
     assert "Sync.GetPrefix()" in source
     assert "local GENERIC_CC_ICON" in source
     assert 'correlationState = "CC_UNKNOWN"' in source

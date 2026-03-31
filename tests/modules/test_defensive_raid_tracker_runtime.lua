@@ -1,3 +1,4 @@
+local SpellDB = dofile("Core/CombatTrackSpellDB.lua")
 local Sync = dofile("Core/CombatTrackSync.lua")
 
 local function buildModuleDefaults(overrides)
@@ -32,13 +33,20 @@ local function loadTracker(moduleDB, roster)
 
   _G.SunderingTools = nil
   _G.SunderingToolsCombatTrackSpellDB = nil
+  _G.SunderingToolsCooldownViewerMeta = nil
   _G.SunderingToolsCombatTrackSync = nil
   _G.SunderingToolsCombatTrackEngine = nil
+  _G.SunderingToolsUnitAuraStateWatcher = nil
+  _G.SunderingToolsFriendlyEventEvidence = nil
+  _G.SunderingToolsFriendlyTrackingRules = nil
+  _G.SunderingToolsFriendlyCooldownInference = nil
   _G.SunderingToolsDefensiveRaidTrackerModel = nil
 
   local createdFrames = {}
   local sentMessages = {}
   local delayedCallbacks = {}
+  local auraBuckets = {}
+  local durationByAuraInstanceID = {}
 
   local function newUiObject(parent)
     local object = {
@@ -166,6 +174,14 @@ local function loadTracker(moduleDB, roster)
       self.events[#self.events + 1] = event
     end
 
+    function frame:RegisterUnitEvent(event, ...)
+      self.events[#self.events + 1] = { event, ... }
+    end
+
+    function frame:UnregisterAllEvents()
+      self.events = {}
+    end
+
     function frame:SetScript(name, callback)
       self.scripts[name] = callback
     end
@@ -219,8 +235,13 @@ local function loadTracker(moduleDB, roster)
 
   _G.SunderingTools = addon
   dofile("Core/CombatTrackSpellDB.lua")
+  dofile("Core/CooldownViewerMeta.lua")
   dofile("Core/CombatTrackSync.lua")
   dofile("Core/CombatTrackEngine.lua")
+  dofile("Core/UnitAuraStateWatcher.lua")
+  dofile("Core/FriendlyEventEvidence.lua")
+  dofile("Core/FriendlyTrackingRules.lua")
+  dofile("Core/FriendlyCooldownInference.lua")
   dofile("Core/TrackerSettings.lua")
   dofile("Modules/DefensiveRaidTrackerModel.lua")
 
@@ -280,6 +301,12 @@ local function loadTracker(moduleDB, roster)
   _G.UnitClass = function(unit)
     local classToken = roster[unit] and roster[unit].classToken or nil
     return classToken, classToken
+  end
+  _G.UnitIsDeadOrGhost = function()
+    return false
+  end
+  _G.UnitIsFeignDeath = function()
+    return false
   end
   _G.GetSpecialization = function()
     return roster.player and roster.player.specID and 1 or nil
@@ -369,6 +396,39 @@ local function loadTracker(moduleDB, roster)
       }
     end,
   }
+  _G.C_Spell = {
+    GetSpellTexture = function(spellID)
+      return "texture:" .. tostring(spellID)
+    end,
+    IsSpellCrowdControl = function()
+      return false
+    end,
+    IsSpellImportant = function()
+      return false
+    end,
+  }
+  _G.C_UnitAuras = {
+    GetUnitAuras = function(unit, filter)
+      local unitBuckets = auraBuckets[unit]
+      if type(unitBuckets) ~= "table" then
+        return {}
+      end
+
+      return unitBuckets[filter] or {}
+    end,
+    GetAuraDuration = function(_, auraInstanceID)
+      return durationByAuraInstanceID[auraInstanceID]
+    end,
+    GetAuraDispelTypeColor = function()
+      return nil
+    end,
+    AuraIsBigDefensive = function(spellID)
+      return SpellDB.ResolveDefensiveSpell(spellID) ~= nil
+    end,
+    IsAuraFilteredOutByInstanceID = function()
+      return false
+    end,
+  }
 
   dofile("Modules/DefensiveRaidTracker.lua")
 
@@ -394,6 +454,8 @@ local function loadTracker(moduleDB, roster)
     onEvent = onEvent,
     runtime = runtime,
     sentMessages = sentMessages,
+    auraBuckets = auraBuckets,
+    durationByAuraInstanceID = durationByAuraInstanceID,
     flushTimers = function()
       while #delayedCallbacks > 0 do
         local callbacks = delayedCallbacks
@@ -632,6 +694,50 @@ do
   local auraMasteryEntry = state.runtime.engine:GetEntry("player-guid:31821")
   assert(auraMasteryEntry ~= nil, "raid defensive runtime should register Aura Mastery for the local player")
   assert(auraMasteryEntry.baseCd == 150, "raid defensive runtime should seed Aura Mastery with the locally reduced Holy Paladin cooldown")
+end
+
+do
+  local state = loadTracker({
+    enabled = true,
+  }, {
+    _group = true,
+    _raid = true,
+    player = {
+      guid = "player-guid",
+      name = "Player-Realm",
+      classToken = "PRIEST",
+      specID = 256,
+    },
+    raid1 = {
+      guid = "raid-guid",
+      name = "Other-Realm",
+      classToken = "PRIEST",
+      specID = 256,
+    },
+  })
+
+  state.onEvent(nil, "GROUP_ROSTER_UPDATE")
+  state.auraBuckets.raid1 = {
+    ["HELPFUL|BIG_DEFENSIVE"] = {
+      {
+        auraInstanceID = 81,
+        spellId = 62618,
+      },
+    },
+  }
+  state.durationByAuraInstanceID[81] = {
+    GetExpirationTime = function()
+      return 280
+    end,
+  }
+  state.onEvent(nil, "UNIT_AURA", "raid1", { isFullUpdate = true })
+
+  state.auraBuckets.raid1["HELPFUL|BIG_DEFENSIVE"] = {}
+  state.onEvent(nil, "UNIT_AURA", "raid1", { isFullUpdate = true })
+
+  local barrierEntry = state.runtime.engine:GetEntry("raid-guid:62618")
+  assert(barrierEntry ~= nil, "raid defensive tracker should infer raid defensives from watcher snapshots when sync is absent")
+  assert(barrierEntry.kind == "RAID_DEF", "inferred raid defensive entries should stay in the raid defensive runtime lane")
 end
 
 do

@@ -1,5 +1,5 @@
 ## Interface: 120000, 120001
-## Version: 0.0.9
+## Version: 0.1.0
 ## Title: SunderingTools
 ## Notes: Lightweight cool tools
 ## Author: Krich
@@ -14,9 +14,12 @@ Core\CombatTrackSpellDB.lua
 Core\CombatTrackSync.lua
 Core\CombatTrackEngine.lua
 Core\CooldownViewerMeta.lua
-Core\PartyCrowdControlAuraWatcher.lua
+Core\UnitAuraStateWatcher.lua
+Core\FriendlyEventEvidence.lua
+Core\FriendlyTrackingRules.lua
+Core\FriendlyTalentResolver.lua
+Core\FriendlyCooldownInference.lua
 Core\PartyCrowdControlResolver.lua
-Core\PartyDefensiveAuraFallback.lua
 Core\FramePositioning.lua
 Core\TrackerFrame.lua
 

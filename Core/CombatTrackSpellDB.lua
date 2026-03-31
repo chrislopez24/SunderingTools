@@ -102,6 +102,18 @@ local function CopyTable(value)
   return copy
 end
 
+local function SanitizeSpellID(spellID)
+  if spellID ~= nil and issecretvalue and issecretvalue(spellID) then
+    return nil
+  end
+
+  if type(spellID) ~= "number" or spellID <= 0 then
+    return nil
+  end
+
+  return spellID
+end
+
 local function RegisterInterruptSpec(specID, classToken, role, spellID, cd, name)
   local entry = {
     specID = specID,
@@ -598,10 +610,20 @@ for classToken, entries in pairs(defensiveSource) do
 end
 
 function SpellDB.GetTrackedSpell(spellID)
+  spellID = SanitizeSpellID(spellID)
+  if not spellID then
+    return nil
+  end
+
   return trackedSpells[trackedSpellAliases[spellID] or spellID]
 end
 
 function SpellDB.GetDefensiveSpell(spellID)
+  spellID = SanitizeSpellID(spellID)
+  if not spellID then
+    return nil
+  end
+
   local canonicalSpellID = trackedSpellAliases[spellID] or defensiveSpellAliases[spellID] or spellID
   return defensiveSpells[canonicalSpellID]
 end
@@ -689,6 +711,11 @@ function SpellDB.ResolveLocalDefensiveSpell(spellID, specID, isKnownSpell)
 end
 
 function SpellDB.ResolveTrackedSpellID(spellID)
+  spellID = SanitizeSpellID(spellID)
+  if not spellID then
+    return nil
+  end
+
   return trackedSpellAliases[spellID] or spellID
 end
 

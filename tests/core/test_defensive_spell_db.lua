@@ -100,3 +100,17 @@ local monkKnownSpells = SpellDB.GetKnownDefensiveSpellsForClass("MONK", 268, { 1
 assert(findSpell(monkKnownSpells, 115203) ~= nil, "known defensive helpers should preserve learned Monk defensives")
 assert(findSpell(monkKnownSpells, 119582) ~= nil, "known defensive helpers should preserve learned Brewmaster defensives")
 assert(findSpell(monkKnownSpells, 122470) == nil, "known defensive helpers should not advertise spec-mismatched Monk defensives")
+
+do
+  local secretSpellID = {}
+  local originalIsSecretValue = _G.issecretvalue
+  _G.issecretvalue = function(value)
+    return value == secretSpellID
+  end
+
+  local ok, result = pcall(SpellDB.GetDefensiveSpell, secretSpellID)
+  assert(ok, "secret spell ids should not error when resolving defensive aliases")
+  assert(result == nil, "secret spell ids should resolve to nil defensive entries")
+
+  _G.issecretvalue = originalIsSecretValue
+end

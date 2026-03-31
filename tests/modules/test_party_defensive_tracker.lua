@@ -196,15 +196,21 @@ local function loadTracker(moduleDB, roster, compactPartyFrame)
 
   _G.SunderingTools = nil
   _G.SunderingToolsCombatTrackSpellDB = nil
+  _G.SunderingToolsCooldownViewerMeta = nil
   _G.SunderingToolsCombatTrackSync = nil
   _G.SunderingToolsCombatTrackEngine = nil
-  _G.SunderingToolsPartyDefensiveAuraFallback = nil
+  _G.SunderingToolsUnitAuraStateWatcher = nil
+  _G.SunderingToolsFriendlyEventEvidence = nil
+  _G.SunderingToolsFriendlyTrackingRules = nil
+  _G.SunderingToolsFriendlyCooldownInference = nil
   _G.SunderingToolsPartyDefensiveTrackerModel = nil
   _G.CompactPartyFrame = compactPartyFrame
 
   local createdFrames = {}
   local delayedCallbacks = {}
   local sentMessages = {}
+  local auraBuckets = {}
+  local durationByAuraInstanceID = {}
   local addon = {
     db = {
       global = {
@@ -230,9 +236,13 @@ local function loadTracker(moduleDB, roster, compactPartyFrame)
 
   _G.SunderingTools = addon
   dofile("Core/CombatTrackSpellDB.lua")
+  dofile("Core/CooldownViewerMeta.lua")
   dofile("Core/CombatTrackSync.lua")
   dofile("Core/CombatTrackEngine.lua")
-  dofile("Core/PartyDefensiveAuraFallback.lua")
+  dofile("Core/UnitAuraStateWatcher.lua")
+  dofile("Core/FriendlyEventEvidence.lua")
+  dofile("Core/FriendlyTrackingRules.lua")
+  dofile("Core/FriendlyCooldownInference.lua")
   dofile("Modules/PartyDefensiveTrackerModel.lua")
 
   _G.C_Timer = {
@@ -285,6 +295,12 @@ local function loadTracker(moduleDB, roster, compactPartyFrame)
   _G.UnitClass = function(unit)
     local classToken = roster[unit] and roster[unit].classToken or nil
     return classToken, classToken
+  end
+  _G.UnitIsDeadOrGhost = function()
+    return false
+  end
+  _G.UnitIsFeignDeath = function()
+    return false
   end
   _G.GetSpecialization = function()
     return roster.player and roster.player.specID and 1 or nil
@@ -375,6 +391,34 @@ local function loadTracker(moduleDB, roster, compactPartyFrame)
     GetSpellTexture = function(spellID)
       return "texture:" .. tostring(spellID)
     end,
+    IsSpellCrowdControl = function()
+      return false
+    end,
+    IsSpellImportant = function()
+      return false
+    end,
+  }
+  _G.C_UnitAuras = {
+    GetUnitAuras = function(unit, filter)
+      local unitBuckets = auraBuckets[unit]
+      if type(unitBuckets) ~= "table" then
+        return {}
+      end
+
+      return unitBuckets[filter] or {}
+    end,
+    GetAuraDuration = function(_, auraInstanceID)
+      return durationByAuraInstanceID[auraInstanceID]
+    end,
+    GetAuraDispelTypeColor = function()
+      return nil
+    end,
+    AuraIsBigDefensive = function(spellID)
+      return SpellDB.ResolveDefensiveSpell(spellID) ~= nil
+    end,
+    IsAuraFilteredOutByInstanceID = function()
+      return false
+    end,
   }
   _G.GameTooltip = {
     owner = nil,
@@ -428,6 +472,8 @@ local function loadTracker(moduleDB, roster, compactPartyFrame)
     compactPartyFrame = compactPartyFrame,
     delayedCallbacks = delayedCallbacks,
     sentMessages = sentMessages,
+    auraBuckets = auraBuckets,
+    durationByAuraInstanceID = durationByAuraInstanceID,
     flushTimers = function()
       while #delayedCallbacks > 0 do
         local callbacks = delayedCallbacks
@@ -1006,8 +1052,6 @@ do
 
   local state = loadTracker({
     enabled = true,
-    syncEnabled = true,
-    strictSyncMode = false,
   }, {
     _group = true,
     party1 = {
@@ -1018,27 +1062,27 @@ do
     },
   }, compactPartyFrame)
 
-  state.runtime.partyUsers.Other = {
-    key = "Other",
-    playerGUID = "other-guid",
-    playerName = "Other",
-    classToken = "DEATHKNIGHT",
-    specID = 252,
-    unitToken = "party1",
-    spellIDs = {},
+  state.onEvent(nil, "GROUP_ROSTER_UPDATE")
+  state.auraBuckets.party1 = {
+    ["HELPFUL|BIG_DEFENSIVE"] = {
+      {
+        auraInstanceID = 77,
+        spellId = 48707,
+      },
+    },
   }
+  state.durationByAuraInstanceID[77] = {
+    GetExpirationTime = function()
+      return 160
+    end,
+  }
+  state.onEvent(nil, "UNIT_AURA", "party1", { isFullUpdate = true })
 
-  state.addon.modules.PartyDefensiveTracker.applyDefensiveFallback({
-    ownerUnit = "party1",
-    spellID = 48707,
-    startTime = 300,
-    readyAt = 360,
-    source = "aura",
-    baseCd = 60,
-  })
+  state.auraBuckets.party1["HELPFUL|BIG_DEFENSIVE"] = {}
+  state.onEvent(nil, "UNIT_AURA", "party1", { isFullUpdate = true })
 
   assert(
     state.runtime.engine:GetEntry("other-guid:48707") ~= nil,
-    "party defensive tracker should accept fallback state when sync is absent"
+    "party defensive tracker should infer party defensives from watcher snapshots when sync is absent"
   )
 end

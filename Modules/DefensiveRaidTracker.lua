@@ -21,6 +21,22 @@ local Engine = assert(
   _G.SunderingToolsCombatTrackEngine,
   "SunderingToolsCombatTrackEngine must load before DefensiveRaidTracker.lua"
 )
+local WatcherModule = assert(
+  _G.SunderingToolsUnitAuraStateWatcher,
+  "SunderingToolsUnitAuraStateWatcher must load before DefensiveRaidTracker.lua"
+)
+local EventEvidence = assert(
+  _G.SunderingToolsFriendlyEventEvidence,
+  "SunderingToolsFriendlyEventEvidence must load before DefensiveRaidTracker.lua"
+)
+local TrackingRules = assert(
+  _G.SunderingToolsFriendlyTrackingRules,
+  "SunderingToolsFriendlyTrackingRules must load before DefensiveRaidTracker.lua"
+)
+local CooldownInference = assert(
+  _G.SunderingToolsFriendlyCooldownInference,
+  "SunderingToolsFriendlyCooldownInference must load before DefensiveRaidTracker.lua"
+)
 local FramePositioning = assert(
   _G.SunderingToolsFramePositioning,
   "SunderingToolsFramePositioning must load before DefensiveRaidTracker.lua"
@@ -65,9 +81,34 @@ local UpdatePartyData
 local UpdateBarVisuals
 local StartCooldownTicker
 
-local runtime = {
+local runtime
+runtime = {
   engine = Engine.New(),
   partyUsers = {},
+  watchers = {},
+  evidence = EventEvidence.New({
+    getTime = GetTime,
+  }),
+  inference = CooldownInference.New({
+    getTime = GetTime,
+    buildEvidenceSet = function(unit, detectionTime)
+      return runtime.evidence:BuildEvidenceSet(unit, detectionTime)
+    end,
+    buildCastSnapshot = function()
+      return runtime.evidence:BuildCastSnapshot()
+    end,
+    resolveEntry = function(spellID, unitContext)
+      local resolved = TrackingRules.ResolveDefensive(spellID, unitContext and unitContext.specID)
+      if resolved and resolved.kind == "RAID_DEF" then
+        return resolved
+      end
+
+      return nil
+    end,
+    matchRule = function(unitContext, tracked, measuredDuration, evidence)
+      return TrackingRules.MatchRaidDefensive(unitContext, tracked, measuredDuration, evidence)
+    end,
+  }),
 }
 local localTalentRanks = {}
 local localTalentConfigID = nil
@@ -674,6 +715,154 @@ local function RegisterUserManifest(user, spellIDs)
     user.unitToken,
     user.specID
   )
+end
+
+local function GetPartyUserByUnit(unitToken)
+  for _, user in pairs(runtime.partyUsers) do
+    if user.unitToken == unitToken then
+      return user
+    end
+  end
+
+  return nil
+end
+
+local function BuildInferenceSnapshot(watcher)
+  local snapshot = {}
+  local seen = {}
+
+  for _, aura in ipairs(watcher:GetDefensiveState() or {}) do
+    if aura and aura.AuraInstanceID and not seen[aura.AuraInstanceID] then
+      snapshot[#snapshot + 1] = aura
+      seen[aura.AuraInstanceID] = true
+    end
+  end
+
+  for _, aura in ipairs(watcher:GetImportantState() or {}) do
+    if aura and aura.AuraInstanceID and not seen[aura.AuraInstanceID] then
+      snapshot[#snapshot + 1] = aura
+      seen[aura.AuraInstanceID] = true
+    end
+  end
+
+  return snapshot
+end
+
+local function ApplyInferredRaidCooldown(payload)
+  local resolved = payload and payload.resolved or nil
+  local unitContext = payload and payload.unitContext or nil
+  if not resolved or resolved.kind ~= "RAID_DEF" or type(resolved.spellID) ~= "number" then
+    return
+  end
+
+  local unit = payload.unit
+  local user = (unitContext and unitContext.playerName and runtime.partyUsers[unitContext.playerName]) or GetPartyUserByUnit(unit)
+  if not user or not user.playerGUID then
+    return
+  end
+
+  local spellSet = BuildSpellSet(user.spellIDs)
+  if not spellSet[resolved.spellID] then
+    user.spellIDs[#user.spellIDs + 1] = resolved.spellID
+  end
+
+  local runtimeKey = BuildRuntimeKey(user.playerGUID, resolved.spellID)
+  local existing = runtime.engine:GetEntry(runtimeKey)
+  if existing and (existing.source == "self" or existing.source == "sync") and (existing.readyAt or 0) >= (payload.readyAt or 0) then
+    return
+  end
+
+  local applied = runtime.engine:UpsertEntry({
+    key = runtimeKey,
+    playerGUID = user.playerGUID,
+    playerName = user.playerName,
+    classToken = user.classToken or resolved.classToken,
+    unitToken = user.unitToken or unit,
+    spellID = resolved.spellID,
+    source = "aura",
+    kind = "RAID_DEF",
+    startTime = payload.startedAt or GetTime(),
+    readyAt = payload.readyAt or ((payload.startedAt or GetTime()) + resolved.cd),
+    baseCd = resolved.cd,
+    cd = resolved.cd,
+    charges = resolved.charges or 1,
+  })
+
+  if applied then
+    UpdatePartyData()
+  end
+end
+
+local function RefreshAuraSnapshot(unitToken, updateInfo)
+  local watcher = runtime.watchers[unitToken]
+  local user = GetPartyUserByUnit(unitToken)
+
+  if not watcher or not user then
+    return
+  end
+
+  watcher:OnEvent("UNIT_AURA", unitToken, updateInfo)
+  runtime.inference:ProcessSnapshot(unitToken, BuildInferenceSnapshot(watcher), {
+    unitToken = unitToken,
+    playerGUID = user.playerGUID,
+    playerName = user.playerName,
+    classToken = user.classToken,
+    specID = user.specID,
+  })
+end
+
+local function EnsureAuraWatcher(user)
+  if not user or not user.unitToken or user.unitToken == "player" then
+    return
+  end
+
+  local unitToken = user.unitToken
+  local watcher = runtime.watchers[unitToken]
+  if watcher then
+    return watcher
+  end
+
+  watcher = WatcherModule.New(unitToken, nil, { Defensives = true, Important = true })
+  watcher:RegisterCallback(function(activeWatcher)
+    if not db or not db.enabled then
+      return
+    end
+
+    local currentUser = GetPartyUserByUnit(unitToken)
+    if not currentUser then
+      return
+    end
+
+    runtime.inference:ProcessSnapshot(unitToken, BuildInferenceSnapshot(activeWatcher), {
+      unitToken = unitToken,
+      playerGUID = currentUser.playerGUID,
+      playerName = currentUser.playerName,
+      classToken = currentUser.classToken,
+      specID = currentUser.specID,
+    })
+  end)
+  runtime.watchers[unitToken] = watcher
+  return watcher
+end
+
+local function RefreshWatcherRoster()
+  local activeUnits = {}
+
+  for _, user in pairs(runtime.partyUsers) do
+    if user.unitToken and user.unitToken ~= "player" then
+      activeUnits[user.unitToken] = true
+      EnsureAuraWatcher(user)
+      RefreshAuraSnapshot(user.unitToken, { isFullUpdate = true })
+    end
+  end
+
+  for unitToken, watcher in pairs(runtime.watchers) do
+    if not activeUnits[unitToken] then
+      watcher:Dispose()
+      runtime.watchers[unitToken] = nil
+      runtime.inference:RemoveUnit(unitToken)
+    end
+  end
 end
 
 local function HandleSyncHelloMessage(payload, sender)
@@ -1543,6 +1732,9 @@ eventFrame:RegisterEvent("PLAYER_TALENT_UPDATE")
 eventFrame:RegisterEvent("SPELLS_CHANGED")
 eventFrame:RegisterEvent("TRAIT_CONFIG_UPDATED")
 eventFrame:RegisterEvent("UNIT_SPELLCAST_SUCCEEDED")
+eventFrame:RegisterEvent("UNIT_AURA")
+eventFrame:RegisterEvent("UNIT_FLAGS")
+eventFrame:RegisterEvent("UNIT_ABSORB_AMOUNT_CHANGED")
 eventFrame:RegisterEvent("CHAT_MSG_ADDON")
 
 eventFrame:SetScript("OnEvent", function(_, event, ...)
@@ -1552,13 +1744,17 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
 
     if db and db.enabled then
       RefreshRuntimeRoster()
+      RefreshWatcherRoster()
       CreateContainer()
       UpdatePartyData()
     end
 
   elseif event == "PLAYER_ENTERING_WORLD" then
     runtime.engine:Reset()
+    runtime.inference:Reset()
+    runtime.evidence:Reset()
     RefreshRuntimeRoster()
+    RefreshWatcherRoster()
 
     if db and db.enabled then
       CreateContainer()
@@ -1571,7 +1767,10 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
 
   elseif event == "CHALLENGE_MODE_START" then
     runtime.engine:Reset()
+    runtime.inference:Reset()
+    runtime.evidence:Reset()
     RefreshRuntimeRoster()
+    RefreshWatcherRoster()
 
     if db and db.enabled then
       UpdatePartyData()
@@ -1583,6 +1782,7 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
 
   elseif event == "GROUP_ROSTER_UPDATE" then
     RefreshRuntimeRoster()
+    RefreshWatcherRoster()
 
     if db and db.enabled then
       UpdatePartyData()
@@ -1600,6 +1800,7 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
   elseif event == "PLAYER_TALENT_UPDATE" or event == "SPELLS_CHANGED" or event == "TRAIT_CONFIG_UPDATED" then
     InvalidateLocalTalentCache()
     RefreshRuntimeRoster()
+    RefreshWatcherRoster()
     if db and db.enabled then
       UpdatePartyData()
     end
@@ -1608,6 +1809,7 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
     if not db or not db.enabled then return end
 
     local unit, _, spellID = ...
+    runtime.evidence:RecordSpellcastSucceeded(unit, GetTime())
     if unit ~= "player" then return end
     if type(spellID) ~= "number" then return end
 
@@ -1644,6 +1846,23 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
       UpdatePartyData()
     end
 
+  elseif event == "UNIT_AURA" then
+    if not db or not db.enabled then
+      return
+    end
+
+    local unitToken, updateInfo = ...
+    runtime.evidence:RecordAuraUpdate(unitToken, updateInfo, GetTime())
+    RefreshAuraSnapshot(unitToken, updateInfo)
+
+  elseif event == "UNIT_FLAGS" then
+    local unitToken = ...
+    runtime.evidence:RecordUnitFlags(unitToken, UnitIsFeignDeath and UnitIsFeignDeath(unitToken) or false, GetTime())
+
+  elseif event == "UNIT_ABSORB_AMOUNT_CHANGED" then
+    local unitToken = ...
+    runtime.evidence:RecordAbsorbChanged(unitToken, GetTime())
+
   elseif event == "CHAT_MSG_ADDON" then
     local prefix, message, _, sender = ...
     if prefix ~= Sync.GetPrefix() then
@@ -1651,6 +1870,12 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
     end
 
     HandleSyncMessage(message, sender)
+  end
+end)
+
+runtime.inference:RegisterCallback(function(event, payload)
+  if event == "COOLDOWN_INFERRED" then
+    ApplyInferredRaidCooldown(payload)
   end
 end)
 

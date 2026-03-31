@@ -48,13 +48,19 @@ def test_party_defensive_tracker_registers_sync_paths_and_preview_edit_mode():
     assert "function module:SetEditMode(enabled)" in source
 
 
-def test_party_defensive_tracker_registers_aura_fallback_runtime():
+def test_party_defensive_tracker_registers_watcher_inference_runtime():
     toc = read("SunderingTools.toc")
     source = read("Modules/PartyDefensiveTracker.lua")
 
-    assert "Core\\PartyDefensiveAuraFallback.lua" in toc
-    assert "_G.SunderingToolsPartyDefensiveAuraFallback" in source
-    assert "module.applyDefensiveFallback = ApplyDefensiveFallback" in source
+    assert "Core\\UnitAuraStateWatcher.lua" in toc
+    assert "Core\\FriendlyEventEvidence.lua" in toc
+    assert "Core\\FriendlyTrackingRules.lua" in toc
+    assert "Core\\FriendlyCooldownInference.lua" in toc
+    assert "_G.SunderingToolsUnitAuraStateWatcher" in source
+    assert "_G.SunderingToolsFriendlyEventEvidence" in source
+    assert "_G.SunderingToolsFriendlyTrackingRules" in source
+    assert "_G.SunderingToolsFriendlyCooldownInference" in source
+    assert "runtime.inference:ProcessSnapshot" in source
 
 
 def test_party_defensive_tracker_ignores_non_defensive_or_raid_defensive_sync_entries():
@@ -83,11 +89,12 @@ def test_party_defensive_tracker_uses_enabled_automatic_sync_and_filters_inbound
     assert "user.hasExplicitManifest" in source
 
 
-def test_party_defensive_tracker_supports_remaining_payloads_for_sync_and_fallback():
+def test_party_defensive_tracker_supports_remaining_payloads_for_sync_and_inference():
     source = read("Modules/PartyDefensiveTracker.lua")
 
     assert "payload.remaining" in source
     assert 'remaining = trackedSpell.cd' in source
+    assert "ApplyInferredDefensiveCooldown" in source
 
 
 def test_party_defensive_tracker_retries_late_compact_party_frame_attachment():
