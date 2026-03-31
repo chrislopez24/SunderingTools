@@ -20,6 +20,7 @@ end
 local function copyAura(aura, now, isSecretValue)
   local spellID = aura.spellId
   local sourceUnit = aura.sourceUnit
+  local expirationTime = sanitizeAuraNumber(aura.expirationTime, isSecretValue)
 
   if isSecretValue and spellID ~= nil and isSecretValue(spellID) then
     spellID = nil
@@ -29,7 +30,6 @@ local function copyAura(aura, now, isSecretValue)
     sourceUnit = nil
   end
 
-  local expirationTime = sanitizeAuraNumber(aura.expirationTime, isSecretValue)
   local remaining = nil
   if expirationTime and expirationTime > 0 then
     remaining = math.max(0, expirationTime - now)
@@ -40,6 +40,7 @@ local function copyAura(aura, now, isSecretValue)
     unitToken = aura.unitToken,
     spellID = spellID,
     sourceUnit = sourceUnit,
+    expirationTime = expirationTime,
     remaining = remaining,
     isCrowdControl = aura.isCrowdControl == true,
   }
@@ -51,6 +52,7 @@ local function stablePayloadChanged(previous, current)
     or previous.unitToken ~= current.unitToken
     or previous.spellID ~= current.spellID
     or previous.sourceUnit ~= current.sourceUnit
+    or previous.expirationTime ~= current.expirationTime
     or previous.isCrowdControl ~= current.isCrowdControl
 end
 

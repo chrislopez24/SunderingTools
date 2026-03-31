@@ -139,6 +139,26 @@ end
 
 do
   local watcher, events = newHarness(100)
+  local snapshot = {
+    {
+      auraInstanceID = 16,
+      spellId = 118,
+      sourceUnit = "party1",
+      expirationTime = 108,
+    },
+  }
+
+  watcher:ProcessAuraSnapshot("nameplate1", snapshot)
+  snapshot[1].expirationTime = 112
+  watcher:ProcessAuraSnapshot("nameplate1", snapshot)
+
+  assert(#events == 2, "same-instance expiration changes should emit cc updates")
+  assert(events[2].event == "CC_UPDATED", "same-instance expiration changes should emit cc updated")
+  assert(events[2].payload.remaining == 12, "updated payload should refresh remaining from new expiration time")
+end
+
+do
+  local watcher, events = newHarness(100)
 
   watcher:ProcessAuraSnapshot("nameplate1", {
     {
