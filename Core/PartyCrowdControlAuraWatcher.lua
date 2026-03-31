@@ -1,6 +1,10 @@
 local Watcher = {}
 Watcher.__index = Watcher
 
+local function isSecretClassification(value, isSecretValue)
+  return value ~= nil and isSecretValue ~= nil and isSecretValue(value)
+end
+
 local function copyAura(aura, now, isSecretValue)
   local spellID = aura.spellId
   local sourceUnit = aura.sourceUnit
@@ -51,12 +55,19 @@ function Watcher:ProcessAuraSnapshot(unitToken, auras)
   local current = {}
 
   for _, aura in ipairs(auras or {}) do
-    local usableSpellID = aura.spellId
-    local classified = usableSpellID ~= nil and isCrowdControl(usableSpellID) or aura.isCrowdControl == true
+    local classification = isCrowdControl(aura)
+    local classified = classification == true
+      or isSecretClassification(classification, isSecretValue)
+      or aura.isCrowdControl == true
     if classified and aura.auraInstanceID then
-      aura.unitToken = unitToken
-      aura.isCrowdControl = true
-      current[aura.auraInstanceID] = copyAura(aura, now, isSecretValue)
+      current[aura.auraInstanceID] = copyAura({
+        auraInstanceID = aura.auraInstanceID,
+        unitToken = unitToken,
+        spellId = aura.spellId,
+        sourceUnit = aura.sourceUnit,
+        expirationTime = aura.expirationTime,
+        isCrowdControl = true,
+      }, now, isSecretValue)
     end
   end
 

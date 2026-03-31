@@ -3,8 +3,20 @@ local Watcher = dofile("Core/PartyCrowdControlAuraWatcher.lua")
 local events = {}
 local watcher = Watcher.New({
   getTime = function() return 100 end,
-  isSecretValue = function(value) return value == "__SECRET__" end,
-  isCrowdControl = function(spellID) return spellID == 118 end,
+  isSecretValue = function(value)
+    return value == "__SECRET__" or value == "__SECRET_CC__"
+  end,
+  isCrowdControl = function(aura)
+    if aura.spellId == 118 then
+      return true
+    end
+
+    if aura.spellId == "__SECRET__" then
+      return "__SECRET_CC__"
+    end
+
+    return false
+  end,
 })
 
 watcher:RegisterCallback(function(event, payload)
@@ -32,7 +44,6 @@ watcher:ProcessAuraSnapshot("nameplate1", {
     spellId = "__SECRET__",
     sourceUnit = "__SECRET__",
     expirationTime = 104,
-    isCrowdControl = true,
   },
 })
 
