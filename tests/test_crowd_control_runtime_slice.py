@@ -14,6 +14,7 @@ def test_crowd_control_tracker_uses_shared_combat_track_core():
     assert "_G.SunderingToolsCombatTrackSpellDB" in source
     assert "_G.SunderingToolsCombatTrackSync" in source
     assert "_G.SunderingToolsCombatTrackEngine" in source
+    assert "_G.SunderingToolsPartyCrowdControlResolver" in source
     assert "engine = Engine.New()" in source
     assert 'kind = "CC"' in source
 
@@ -37,7 +38,7 @@ def test_crowd_control_tracker_uses_aura_detection_for_party_fallback_without_sy
     assert 'RegisterUnitEvent("UNIT_AURA", au)' in source
     assert "C_UnitAuras.GetAuraDataByIndex" in source
     assert "HasSecretRestrictions" in source
-    assert "runtime.engine:ApplyCorrelatedCast" in source
+    assert "ResolveAppliedCrowdControl" in source
     assert "runtime.recentPartyCasts[shortName] = GetTime()" in source
 
 

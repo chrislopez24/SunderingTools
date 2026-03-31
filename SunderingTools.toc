@@ -13,6 +13,7 @@ Core\CombatTrackSpellDB.lua
 Core\CombatTrackSync.lua
 Core\CombatTrackEngine.lua
 Core\PartyCrowdControlAuraWatcher.lua
+Core\PartyCrowdControlResolver.lua
 Core\FramePositioning.lua
 Core\TrackerFrame.lua
 

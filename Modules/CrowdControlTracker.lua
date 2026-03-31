@@ -17,6 +17,10 @@ local Engine = assert(
   _G.SunderingToolsCombatTrackEngine,
   "SunderingToolsCombatTrackEngine must load before CrowdControlTracker.lua"
 )
+local Resolver = assert(
+  _G.SunderingToolsPartyCrowdControlResolver,
+  "SunderingToolsPartyCrowdControlResolver must load before CrowdControlTracker.lua"
+)
 local FramePositioning = assert(
   _G.SunderingToolsFramePositioning,
   "SunderingToolsFramePositioning must load before CrowdControlTracker.lua"
@@ -404,6 +408,14 @@ local function GetTrackedCrowdControlInfo(spellID)
   return nil
 end
 
+local crowdControlResolver = Resolver.New({
+  getTime = GetTime,
+  getCooldownForSpell = function(spellID)
+    local tracked = GetTrackedCrowdControlInfo(spellID)
+    return tracked and tracked.cd or 0
+  end,
+})
+
 local function BuildSpellSet(spellIDs)
   local spellSet = {}
   for _, spellID in ipairs(spellIDs or {}) do
@@ -741,7 +753,15 @@ local function HandlePartyWatcher(ownerUnit)
   end
 end
 
-local function ApplyObservedCrowdControl(unit, spellID, trackedSpell, observedAt)
+local function ApplyResolvedCrowdControl(resolved)
+  if type(resolved) ~= "table" then
+    return
+  end
+
+  local unit = resolved.ownerUnit
+  local spellID = resolved.spellID
+  local trackedSpell = GetTrackedCrowdControlInfo(spellID)
+  local observedAt = resolved.startTime
   if not unit or unit == "player" or not UnitExists(unit) or type(trackedSpell) ~= "table" then
     return
   end
@@ -753,8 +773,8 @@ local function ApplyObservedCrowdControl(unit, spellID, trackedSpell, observedAt
     return
   end
 
-  local cooldown = trackedSpell.cd or 0
-  local readyAt = cooldown > 0 and (observedAt + cooldown) or 0
+  local cooldown = resolved.baseCd or trackedSpell.cd or 0
+  local readyAt = resolved.endTime or (cooldown > 0 and (observedAt + cooldown) or 0)
   local runtimeKey = BuildRuntimeKey(guid, spellID)
   local existing = runtime.engine:GetEntry(runtimeKey)
   if existing and (existing.readyAt or 0) >= readyAt then
@@ -774,6 +794,8 @@ local function ApplyObservedCrowdControl(unit, spellID, trackedSpell, observedAt
     applied.essential = trackedSpell.essential == true
     applied.baseCd = cooldown
     applied.cd = cooldown
+    applied.source = resolved.source or applied.source
+    applied.confidence = resolved.confidence
     ApplyRuntimeCooldownEntry(applied)
   end
 end
@@ -841,8 +863,16 @@ local function DetectCrowdControlAuras(unit)
     end
 
     runtime.recentPartyCasts[candidateName] = nil
-    addon:DebugLog("cc", "corr", candidateName, trackedSpell.spellID, "secret")
-    ApplyObservedCrowdControl(candidateUnit, trackedSpell.spellID, trackedSpell, now)
+    local resolved = crowdControlResolver:ResolveAppliedCrowdControl({
+      targetUnit = unit,
+      ownerUnit = candidateUnit,
+      spellID = trackedSpell.spellID,
+      source = "correlated",
+    })
+    if resolved then
+      addon:DebugLog("cc", "corr", candidateName, trackedSpell.spellID, "secret")
+      ApplyResolvedCrowdControl(resolved)
+    end
     return
   end
 
@@ -866,8 +896,16 @@ local function DetectCrowdControlAuras(unit)
           if sourceShortName and sourceShortName ~= playerName and runtime.partyAddonUsers[sourceShortName] then
             local sourcePartyUnit = GetUnitBySender(sourceShortName)
             if sourcePartyUnit and sourcePartyUnit ~= "player" then
-              addon:DebugLog("cc", "corr", sourceShortName, spellID, "aura")
-              ApplyObservedCrowdControl(sourcePartyUnit, spellID, trackedSpell, now)
+              local resolved = crowdControlResolver:ResolveAppliedCrowdControl({
+                targetUnit = unit,
+                spellID = spellID,
+                sourceUnit = sourcePartyUnit,
+                source = "aura",
+              })
+              if resolved then
+                addon:DebugLog("cc", "corr", sourceShortName, spellID, "aura")
+                ApplyResolvedCrowdControl(resolved)
+              end
             end
           end
         end

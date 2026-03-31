@@ -4,6 +4,7 @@ Engine.__index = Engine
 local priority = {
   auto = 1,
   correlated = 2,
+  aura = 2,
   sync = 3,
   self = 4,
 }

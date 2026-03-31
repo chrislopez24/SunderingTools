@@ -1,3 +1,4 @@
+_G.SunderingToolsCombatTrackSpellDB = dofile("Core/CombatTrackSpellDB.lua")
 local Model = dofile("Modules/CrowdControlTrackerModel.lua")
 
 local posX, posY = Model.GetDefaultPosition()
@@ -49,3 +50,13 @@ local sorted = Model.SortBars({
 assert(sorted[1].key == "cooling-mage", "longer remaining CC cooldowns should sort first like Kryos")
 assert(sorted[2].key == "cooling-shaman", "shorter active cooldowns should sort after longer ones")
 assert(sorted[3].key == "ready-paladin", "ready CC entries should sort after active cooldowns")
+
+local trackerSource = readfile and readfile("Modules/CrowdControlTracker.lua") or nil
+assert(
+  trackerSource == nil or trackerSource:find("SunderingToolsPartyCrowdControlResolver", 1, true),
+  "crowd control tracker should depend on the resolver"
+)
+assert(
+  trackerSource == nil or trackerSource:find("ResolveAppliedCrowdControl", 1, true),
+  "crowd control tracker should resolve normalized crowd control observations"
+)
