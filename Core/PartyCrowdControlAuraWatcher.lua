@@ -5,6 +5,18 @@ local function isSecretClassification(value, isSecretValue)
   return value ~= nil and isSecretValue ~= nil and isSecretValue(value)
 end
 
+local function sanitizeAuraNumber(value, isSecretValue)
+  if type(value) ~= "number" then
+    return nil
+  end
+
+  if isSecretValue and isSecretValue(value) then
+    return nil
+  end
+
+  return value
+end
+
 local function copyAura(aura, now, isSecretValue)
   local spellID = aura.spellId
   local sourceUnit = aura.sourceUnit
@@ -17,7 +29,7 @@ local function copyAura(aura, now, isSecretValue)
     sourceUnit = nil
   end
 
-  local expirationTime = aura.expirationTime or 0
+  local expirationTime = sanitizeAuraNumber(aura.expirationTime, isSecretValue) or 0
   local remaining = expirationTime > 0 and math.max(0, expirationTime - now) or 0
 
   return {
@@ -28,6 +40,16 @@ local function copyAura(aura, now, isSecretValue)
     remaining = remaining,
     isCrowdControl = aura.isCrowdControl == true,
   }
+end
+
+local function payloadChanged(previous, current)
+  return previous == nil
+    or previous.auraInstanceID ~= current.auraInstanceID
+    or previous.unitToken ~= current.unitToken
+    or previous.spellID ~= current.spellID
+    or previous.sourceUnit ~= current.sourceUnit
+    or previous.remaining ~= current.remaining
+    or previous.isCrowdControl ~= current.isCrowdControl
 end
 
 function Watcher.New(deps)
@@ -46,6 +68,19 @@ function Watcher:Emit(event, payload)
   for _, callback in ipairs(self.callbacks) do
     callback(event, payload)
   end
+end
+
+function Watcher:RemoveUnit(unitToken)
+  local previous = self.activeByUnit[unitToken]
+  if not previous then
+    return
+  end
+
+  for _, payload in pairs(previous) do
+    self:Emit("CC_REMOVED", payload)
+  end
+
+  self.activeByUnit[unitToken] = nil
 end
 
 function Watcher:ProcessAuraSnapshot(unitToken, auras)
@@ -77,8 +112,10 @@ function Watcher:ProcessAuraSnapshot(unitToken, auras)
   for auraInstanceID, payload in pairs(current) do
     if not previous[auraInstanceID] then
       self:Emit("CC_APPLIED", payload)
-    else
+    elseif payloadChanged(previous[auraInstanceID], payload) then
       self:Emit("CC_UPDATED", payload)
+    else
+      current[auraInstanceID] = previous[auraInstanceID]
     end
   end
 
