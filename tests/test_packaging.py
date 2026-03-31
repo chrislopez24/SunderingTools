@@ -35,7 +35,7 @@ def test_toc_no_missing_embeds_and_new_entrypoints():
     toc = (ROOT / "SunderingTools.toc").read_text(encoding="utf-8")
     assert "Libs\\LibStub\\LibStub.lua" not in toc
     assert "Libs\\CallbackHandler-1.0\\CallbackHandler-1.0.lua" not in toc
-    assert "## Version: 0.0.8" in toc
+    assert "## Version: 0.0.9" in toc
     assert "Modules\\InterruptTrackerModel.lua" in toc
     assert "Modules\\InterruptTracker.lua" in toc
     assert "Modules\\PartyDefensiveTrackerModel.lua" in toc

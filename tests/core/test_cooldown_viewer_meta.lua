@@ -16,6 +16,10 @@ C_CooldownViewer = {
     end
   end,
   GetCooldownViewerCategorySet = function(category)
+    if category < 0 or category > 3 then
+      error("invalid cooldown viewer category", 0)
+    end
+
     if category == 3 then
       return { 77 }
     end
