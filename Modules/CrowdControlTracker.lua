@@ -724,7 +724,7 @@ local function CanRecordWatcherTimestamp(ownerUnit)
   local shortName = ShortName(UnitName(ownerUnit))
   local _, classToken = UnitClass(ownerUnit)
   local primary = SpellDB.GetPrimaryCrowdControlForClass(classToken)
-  if not shortName or not primary or not runtime.partyAddonUsers[shortName] then
+  if not shortName or not primary then
     return false
   end
 
@@ -893,7 +893,7 @@ local function DetectCrowdControlAuras(unit)
         local okName, sourceName = pcall(UnitName, sourceUnit)
         if okName and sourceName then
           local sourceShortName = ShortName(sourceName)
-          if sourceShortName and sourceShortName ~= playerName and runtime.partyAddonUsers[sourceShortName] then
+          if sourceShortName and sourceShortName ~= playerName then
             local sourcePartyUnit = GetUnitBySender(sourceShortName)
             if sourcePartyUnit and sourcePartyUnit ~= "player" then
               local resolved = crowdControlResolver:ResolveAppliedCrowdControl({
@@ -1217,6 +1217,15 @@ local function RefreshRuntimeCrowdControlRegistration()
   end
 
   if not IsStrictSyncMode() then
+    for i = 1, 4 do
+      local unit = "party" .. i
+      if UnitExists(unit) then
+        RegisterRuntimeCrowdControl(unit, nil, nil, {
+          auto = true,
+        })
+      end
+    end
+
     return
   end
 

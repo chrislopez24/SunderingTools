@@ -112,6 +112,7 @@ local runtime = {
     partyWatchFrames = {},
     partyPetWatchFrames = {},
     nameplateWatchFrames = {},
+    activeEnemyChannels = {},
     lastSelfInterruptTime = 0,
     lastHelloAt = 0,
     lastCorrName = nil,
@@ -121,6 +122,7 @@ local runtime = {
     noInterruptPlayers = {},
     recentPartyCasts = {},
 }
+local CHANNEL_MIN_DURATION = 1.0
 
 local function IsStrictSyncMode()
     return db and db.strictSyncMode == true
@@ -1010,6 +1012,36 @@ local function HandleEnemyInterrupted()
         UpdatePartyData()
     else
         addon:DebugLog("int", "corr", "miss")
+    end
+end
+
+local function BuildEnemyChannelKey(unit)
+    if not unit or unit == "" then
+        return nil
+    end
+
+    return UnitGUID(unit) or unit
+end
+
+local function HandleEnemyChannelStart(unit)
+    local key = BuildEnemyChannelKey(unit)
+    if not key then
+        return
+    end
+
+    runtime.activeEnemyChannels[key] = GetTime()
+end
+
+local function HandleEnemyChannelStop(unit)
+    local key = BuildEnemyChannelKey(unit)
+    if not key then
+        return
+    end
+
+    local startedAt = runtime.activeEnemyChannels[key]
+    runtime.activeEnemyChannels[key] = nil
+    if startedAt and (GetTime() - startedAt) < CHANNEL_MIN_DURATION then
+        HandleEnemyInterrupted()
     end
 end
 
@@ -2074,8 +2106,25 @@ RegisterEnemyWatchers = function()
         "target", "focus",
         "boss1", "boss2", "boss3", "boss4", "boss5"
     )
-    enemyWatcherFrame:SetScript("OnEvent", function()
-        HandleEnemyInterrupted()
+    enemyWatcherFrame:RegisterUnitEvent(
+        "UNIT_SPELLCAST_CHANNEL_START",
+        "target", "focus",
+        "boss1", "boss2", "boss3", "boss4", "boss5"
+    )
+    enemyWatcherFrame:RegisterUnitEvent(
+        "UNIT_SPELLCAST_CHANNEL_STOP",
+        "target", "focus",
+        "boss1", "boss2", "boss3", "boss4", "boss5"
+    )
+    enemyWatcherFrame:SetScript("OnEvent", function(_, event, unit)
+        if event == "UNIT_SPELLCAST_INTERRUPTED" then
+            runtime.activeEnemyChannels[BuildEnemyChannelKey(unit)] = nil
+            HandleEnemyInterrupted()
+        elseif event == "UNIT_SPELLCAST_CHANNEL_START" then
+            HandleEnemyChannelStart(unit)
+        elseif event == "UNIT_SPELLCAST_CHANNEL_STOP" then
+            HandleEnemyChannelStop(unit)
+        end
     end)
 
     for i = 1, 40 do
@@ -2086,8 +2135,17 @@ RegisterEnemyWatchers = function()
 
         runtime.nameplateWatchFrames[npUnit]:UnregisterAllEvents()
         runtime.nameplateWatchFrames[npUnit]:RegisterUnitEvent("UNIT_SPELLCAST_INTERRUPTED", npUnit)
-        runtime.nameplateWatchFrames[npUnit]:SetScript("OnEvent", function()
-            HandleEnemyInterrupted()
+        runtime.nameplateWatchFrames[npUnit]:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_START", npUnit)
+        runtime.nameplateWatchFrames[npUnit]:RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_STOP", npUnit)
+        runtime.nameplateWatchFrames[npUnit]:SetScript("OnEvent", function(_, event, unit)
+            if event == "UNIT_SPELLCAST_INTERRUPTED" then
+                runtime.activeEnemyChannels[BuildEnemyChannelKey(unit or npUnit)] = nil
+                HandleEnemyInterrupted()
+            elseif event == "UNIT_SPELLCAST_CHANNEL_START" then
+                HandleEnemyChannelStart(unit or npUnit)
+            elseif event == "UNIT_SPELLCAST_CHANNEL_STOP" then
+                HandleEnemyChannelStop(unit or npUnit)
+            end
         end)
     end
 end
@@ -2119,6 +2177,7 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         wipe(runtime.partyManifests)
         wipe(runtime.noInterruptPlayers)
         wipe(runtime.recentPartyCasts)
+        wipe(runtime.activeEnemyChannels)
         wipe(cooldownState)
         runtime.engine:Reset()
         runtime.lastSelfInterruptTime = 0
@@ -2149,6 +2208,7 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
     elseif event == "CHALLENGE_MODE_START" then
         wipe(runtime.partyManifests)
         wipe(runtime.recentPartyCasts)
+        wipe(runtime.activeEnemyChannels)
         wipe(cooldownState)
         runtime.engine:Reset()
         runtime.lastHelloAt = 0

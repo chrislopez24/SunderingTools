@@ -88,22 +88,30 @@ def test_crowd_control_tracker_settings_shell_exposes_filter_mode_controls():
     assert 'filterModes = { "ESSENTIALS", "ALL" }' in source
 
 
-def test_crowd_control_tracker_only_registers_remote_members_after_addon_presence():
+def test_crowd_control_tracker_pre_registers_remote_members_without_addon_presence():
     source = read("Modules/CrowdControlTracker.lua")
 
     assert "partyAddonUsers = {}" in source
     assert "partyManifests = {}" in source
-    assert "runtime.partyAddonUsers[shortName]" in source or "runtime.partyAddonUsers[sourceShortName]" in source
     assert 'runtime.partyAddonUsers[senderShort] = true' in source
 
     refresh_start = source.index("local function RefreshRuntimeCrowdControlRegistration()")
     refresh_end = source.index("local function UpdateAnchorVisuals(enabled)", refresh_start)
     refresh_block = source[refresh_start:refresh_end]
+    watcher_start = source.index("local function CanRecordWatcherTimestamp(ownerUnit)")
+    watcher_end = source.index("local function HandlePartyWatcher(ownerUnit)", watcher_start)
+    watcher_block = source[watcher_start:watcher_end]
+    aura_start = source.index("local function DetectCrowdControlAuras(unit)")
+    aura_end = source.index("local ccAuraUnits =", aura_start)
+    aura_block = source[aura_start:aura_end]
 
     assert 'RegisterRuntimeCrowdControl("player", nil, nil, {' in refresh_block
     assert 'Sync.Send("CC_MANIFEST"' in source
     assert "if not IsStrictSyncMode() then" in refresh_block
+    assert 'RegisterRuntimeCrowdControl(unit, nil, nil, {' in refresh_block
     assert 'RegisterRuntimeCrowdControl(unit, spellID, trackedSpell.cd, {' in refresh_block
+    assert "runtime.partyAddonUsers[shortName]" not in watcher_block
+    assert "runtime.partyAddonUsers[sourceShortName]" not in aura_block
 
 
 def test_crowd_control_tracker_supports_optional_tracker_header():

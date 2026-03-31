@@ -191,6 +191,19 @@ def test_interrupt_tracker_registers_kryos_style_enemy_watchers_for_interrupt_co
     assert "runtime.lastSelfInterruptTime > 0" in source
 
 
+def test_interrupt_tracker_treats_short_enemy_channel_stops_as_interrupt_correlation_events():
+    source = read("Modules/InterruptTracker.lua")
+
+    assert "enemyWatcherFrame:RegisterUnitEvent(" in source
+    assert '"UNIT_SPELLCAST_CHANNEL_START"' in source
+    assert '"UNIT_SPELLCAST_CHANNEL_STOP"' in source
+    assert 'RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_START", npUnit)' in source
+    assert 'RegisterUnitEvent("UNIT_SPELLCAST_CHANNEL_STOP", npUnit)' in source
+    assert "local CHANNEL_MIN_DURATION" in source
+    assert "HandleEnemyChannelStart(unit)" in source
+    assert "HandleEnemyChannelStop(unit)" in source
+
+
 def test_interrupt_tracker_ready_sound_support_is_optional_lsm_with_local_fallbacks():
     source = read("Modules/InterruptTracker.lua")
 
