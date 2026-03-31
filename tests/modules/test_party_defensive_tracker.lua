@@ -664,6 +664,10 @@ do
   state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "DEF_MANIFEST:DEF:", nil, "Other-Realm")
   local keysAfterEmptyManifest = getDefEntryKeys(state.runtime)
   assert(#keysAfterEmptyManifest == #baselineKeys, "explicit empty party defensive manifests should prune stale synced entries")
+
+  state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "DEF_STATE:48707:DEF:60:1:60", nil, "Other-Realm")
+  local keysAfterStaleState = getDefEntryKeys(state.runtime)
+  assert(#keysAfterStaleState == #baselineKeys, "explicit party defensive manifests should block stale sync states from recreating pruned entries")
 end
 
 do

@@ -489,11 +489,6 @@ do
   state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "DEF_STATE:51052:RAID_DEF:120:1:120", nil, "Other-Realm")
   local placeholderKeys = getRaidEntryKeys(state.runtime)
   assert(#placeholderKeys == 1 and placeholderKeys[1] == "sync:Other:51052", "sync-only users should create a placeholder runtime entry before roster data arrives")
-
-  state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "DEF_MANIFEST:", nil, "Other-Realm")
-  assert(#getRaidEntryKeys(state.runtime) == 0, "empty manifests should prune stale raid defensive runtime entries")
-
-  state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "DEF_STATE:51052:RAID_DEF:120:1:120", nil, "Other-Realm")
   roster._group = true
   roster.party1 = {
     guid = "party-guid",
@@ -550,6 +545,10 @@ do
   state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "DEF_MANIFEST:RAID_DEF:", nil, "Other-Realm")
   local keysAfterEmptyManifest = getRaidEntryKeys(state.runtime)
   assert(#keysAfterEmptyManifest == #baselineKeys, "explicit empty raid defensive manifests should prune stale synced entries")
+
+  state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "DEF_STATE:51052:RAID_DEF:120:1:120", nil, "Other-Realm")
+  local keysAfterStaleState = getRaidEntryKeys(state.runtime)
+  assert(#keysAfterStaleState == #baselineKeys, "explicit raid defensive manifests should block stale sync states from recreating pruned entries")
 end
 
 do

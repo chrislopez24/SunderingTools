@@ -845,6 +845,7 @@ local function RefreshRuntimeRoster()
           specID = specID,
           unitToken = unit,
           spellIDs = spellIDs,
+          hasExplicitManifest = false,
         }
         runtime.partyUsers[playerName] = user
 
@@ -888,6 +889,7 @@ local function GetOrCreatePartyUser(userKey, fallbackSpellID)
     specID = nil,
     unitToken = nil,
     spellIDs = {},
+    hasExplicitManifest = false,
   }
   runtime.partyUsers[userKey] = user
   return user
@@ -895,6 +897,7 @@ end
 
 local function RegisterUserManifest(user, spellIDs)
   user.spellIDs = {}
+  user.hasExplicitManifest = true
 
   for _, spellID in ipairs(spellIDs or {}) do
     local trackedSpell = SpellDB.ResolveDefensiveSpell(spellID, user.specID)
@@ -1030,6 +1033,10 @@ ReconcilePartyUser = function(user, previousUser)
 
   if not user.specID then
     user.specID = previousUser.specID
+  end
+
+  if previousUser.hasExplicitManifest then
+    user.hasExplicitManifest = true
   end
 
   if previousUser.playerGUID == user.playerGUID then
@@ -1175,6 +1182,9 @@ local function HandleSyncDefensiveStateMessage(payload, sender)
     user.classToken = trackedSpell.classToken
   end
   local spellSet = BuildSpellSet(user.spellIDs)
+  if user.hasExplicitManifest and not spellSet[payload.spellID] then
+    return
+  end
   if not spellSet[payload.spellID] then
     user.spellIDs[#user.spellIDs + 1] = payload.spellID
   end

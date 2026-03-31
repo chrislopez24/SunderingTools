@@ -78,6 +78,7 @@ def test_party_defensive_tracker_uses_enabled_automatic_sync_and_filters_inbound
     assert "if IsInGroup() then" in source
     assert "IsTrackedSender(userKey)" in source
     assert "GetOrCreatePartyUser(userKey" in source
+    assert "user.hasExplicitManifest" in source
 
 
 def test_party_defensive_tracker_supports_remaining_payloads_for_sync_and_fallback():

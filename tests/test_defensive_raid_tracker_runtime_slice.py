@@ -46,6 +46,7 @@ def test_defensive_raid_tracker_inbound_sync_follows_enabled_automatic_sync_poli
 
     assert "if not db or not db.enabled then" in source
     assert "if IsInGroup() then" in source
+    assert "user.hasExplicitManifest" in source
 
 
 def test_defensive_raid_tracker_prunes_and_reconciles_runtime_sync_state():
