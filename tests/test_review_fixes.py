@@ -72,7 +72,6 @@ def test_interrupt_tracker_panel_exposes_technical_controls():
         "Bar Height",
         "Icon Size",
         "Font Size",
-        "Enable Party Sync",
     ):
         assert label in source
     assert 'addonRef:SetModuleValue("InterruptTracker", "iconSize", value)' in source
@@ -167,7 +166,6 @@ def test_crowd_control_and_sundering_shell_use_consistent_setting_state_labels()
         "State",
         "Behavior",
         "Layout",
-        "Enable Party Sync",
         "M+ Essentials",
         "All CC",
     ):

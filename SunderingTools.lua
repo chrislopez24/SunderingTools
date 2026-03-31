@@ -5,6 +5,7 @@ local addonName, addon = ...
 local Config = assert(_G.SunderingToolsConfig, "SunderingToolsConfig must load before SunderingTools.lua")
 local Registry = assert(_G.SunderingToolsRegistry, "SunderingToolsRegistry must load before SunderingTools.lua")
 local SettingsModel = assert(_G.SunderingToolsSettingsModel, "SunderingToolsSettingsModel must load before SunderingTools.lua")
+local TrackerSettings = assert(_G.SunderingToolsTrackerSettings, "SunderingToolsTrackerSettings must load before SunderingTools.lua")
 
 _G.SunderingTools = addon
 
@@ -96,6 +97,16 @@ function addon:InitDB()
 
     for key in pairs(self.modules) do
         self.db[key] = self.db.modules[key]
+    end
+
+    TrackerSettings.SanitizeBarConfig(self.db.modules.InterruptTracker)
+    TrackerSettings.SanitizeBarConfig(self.db.modules.CrowdControlTracker)
+    TrackerSettings.SanitizeBarConfig(self.db.modules.DefensiveRaidTracker)
+
+    local partyDefensive = self.db.modules.PartyDefensiveTracker
+    if type(partyDefensive) == "table" then
+        partyDefensive.syncEnabled = nil
+        partyDefensive.strictSyncMode = nil
     end
 end
 

@@ -2,9 +2,13 @@
 
 Lightweight WoW addon with interrupt, crowd control, party defensive, raid defensive, and bloodlust tracking.
 
-## Strict Sync PvE Mode
+## Tracker Model
 
-The trackers support a strict sync-first mode for party and raid PvE. When enabled per tracker, the addon prefers owner-authoritative addon sync and manifest-backed spell ownership, hides uncertain remote data, and uses clock-safe `remaining` payloads instead of sender-local absolute cooldown timestamps.
+SunderingTools keeps cooldown bars as the primary layer for interrupts, crowd control, and raid defensives, with secondary live-state overlays where they improve reliability:
+
+- Crowd control bars start from resolved runtime events and active CC can also appear on nameplates while the aura is live.
+- Party defensives stay attached to Blizzard party frames and combine addon sync with aura-driven fallback automatically.
+- Remote sync and fallback policy is automatic; there are no user-facing strict sync toggles.
 
 The repository is set up for tagged GitHub release packaging via the BigWigs packager.
 

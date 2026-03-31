@@ -33,7 +33,6 @@ assert(sorted[3].key == "ready-b", "ready icons should remain stable after activ
 local function buildModuleDefaults(overrides)
   local defaults = {
     enabled = true,
-    syncEnabled = true,
     previewWhenSolo = true,
     maxIcons = 4,
     iconSize = 20,
@@ -497,27 +496,6 @@ do
 
   local state = loadTracker({
     enabled = true,
-    syncEnabled = false,
-  }, {
-    player = {
-      guid = "player-guid",
-      name = "Player-Realm",
-      classToken = "DEATHKNIGHT",
-    },
-  }, compactPartyFrame)
-
-  state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "DEF_STATE:48707:DEF:60:1:60", nil, "Other-Realm")
-
-  assert(#getDefEntryKeys(state.runtime) == 0, "sync-disabled party defensive tracker should ignore inbound sync state")
-  assert(next(state.runtime.partyUsers) == nil, "sync-disabled party defensive tracker should not create remote users from sync traffic")
-end
-
-do
-  local compactPartyFrame = buildCompactPartyFrame()
-  compactPartyFrame.memberUnitFrames[1].unit = "player"
-
-  local state = loadTracker({
-    enabled = true,
     syncEnabled = true,
   }, {
     player = {
@@ -663,8 +641,6 @@ do
 
   local state = loadTracker({
     enabled = true,
-    syncEnabled = true,
-    strictSyncMode = true,
   }, {
     _group = true,
     player = {
@@ -682,13 +658,12 @@ do
   state.onEvent(nil, "GROUP_ROSTER_UPDATE")
   local baselineKeys = getDefEntryKeys(state.runtime)
   state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "DEF_STATE:48707:DEF:60:1:60", nil, "Other-Realm")
-  local keysWithoutManifest = getDefEntryKeys(state.runtime)
-  assert(#keysWithoutManifest == #baselineKeys, "strict party defensive mode should ignore synced state until a manifest is known")
+  local keysAfterState = getDefEntryKeys(state.runtime)
+  assert(#keysAfterState == (#baselineKeys + 1), "automatic party defensive sync should accept tracked state before a manifest arrives")
 
-  state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "DEF_MANIFEST:DEF:48707", nil, "Other-Realm")
-  state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "DEF_STATE:48707:DEF:60:1:60", nil, "Other-Realm")
-  local keysWithManifest = getDefEntryKeys(state.runtime)
-  assert(#keysWithManifest == (#baselineKeys + 1), "strict party defensive mode should accept synced state after a manifest announces the spell")
+  state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "DEF_MANIFEST:DEF:", nil, "Other-Realm")
+  local keysAfterEmptyManifest = getDefEntryKeys(state.runtime)
+  assert(#keysAfterEmptyManifest == #baselineKeys, "explicit empty party defensive manifests should prune stale synced entries")
 end
 
 do

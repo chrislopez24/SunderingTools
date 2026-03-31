@@ -36,6 +36,11 @@ local function loadAddon()
       return {}
     end,
   }
+  _G.SunderingToolsTrackerSettings = {
+    SanitizeBarConfig = function(moduleDB)
+      return moduleDB
+    end,
+  }
   _G.CreateFrame = function()
     return stubFrame()
   end

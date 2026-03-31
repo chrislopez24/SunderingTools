@@ -29,6 +29,10 @@ local TrackerFrame = assert(
   _G.SunderingToolsTrackerFrame,
   "SunderingToolsTrackerFrame must load before CrowdControlTracker.lua"
 )
+local TrackerSettings = assert(
+  _G.SunderingToolsTrackerSettings,
+  "SunderingToolsTrackerSettings must load before CrowdControlTracker.lua"
+)
 
 local defaultPosX, defaultPosY = Model.GetDefaultPosition()
 local filterModes = { "ESSENTIALS", "ALL" }
@@ -40,31 +44,9 @@ local module = {
   label = "Crowd Control Tracker",
   description = "Track crowd control, choose the filter, and adjust layout.",
   order = 15,
-  defaults = {
-    enabled = true,
-    posX = defaultPosX,
-    posY = defaultPosY,
-    positionMode = "CENTER_OFFSET",
-    previewWhenSolo = true,
-    maxBars = 5,
-    growDirection = "DOWN",
-    spacing = 0,
-    iconSize = 18,
-    barWidth = 175,
-    barHeight = 18,
-    fontSize = 11,
-    syncEnabled = true,
-    strictSyncMode = false,
-    showHeader = true,
-    showInDungeon = true,
-    showInRaid = true,
-    showInWorld = true,
-    showInArena = true,
-    hideOutOfCombat = false,
-    showReady = true,
-    tooltipOnHover = true,
+  defaults = TrackerSettings.CreateBarDefaults(defaultPosX, defaultPosY, {
     filterMode = Model.GetDefaultFilterMode(),
-  },
+  }),
 }
 
 local db = addon.db and addon.db.CrowdControlTracker
@@ -98,10 +80,6 @@ local runtime = {
   needsVisualRefresh = false,
   visualRefreshScheduled = false,
 }
-
-local function IsStrictSyncMode()
-  return db and db.strictSyncMode == true
-end
 
 local function GetCachedSpellTexture(spellID)
   if not spellID then
@@ -158,20 +136,7 @@ local function ShouldShowPreview()
 end
 
 local function IsCurrentInstanceAllowed()
-  if not db or not db.enabled then
-    return false
-  end
-
-  local _, instanceType = GetInstanceInfo()
-  if instanceType == "party" then
-    return db.showInDungeon ~= false
-  elseif instanceType == "raid" then
-    return db.showInRaid ~= false
-  elseif instanceType == "arena" then
-    return db.showInArena ~= false
-  end
-
-  return db.showInWorld ~= false
+  return TrackerSettings.IsBarContextAllowed(db)
 end
 
 local function ShouldHideForCombat()
@@ -434,11 +399,17 @@ local function GetManifestForUser(shortName)
     manifest = {
       spellList = {},
       spells = {},
+      received = false,
     }
     runtime.partyManifests[shortName] = manifest
   end
 
   return manifest
+end
+
+local function HasAuthoritativeManifest(shortName)
+  local manifest = shortName and runtime.partyManifests[shortName] or nil
+  return manifest ~= nil and manifest.received == true
 end
 
 local function HasManifestSpell(shortName, spellID)
@@ -646,7 +617,7 @@ local function BuildRuntimeBarEntries()
   local entries = {}
   local unitsByToken = {}
   local now = GetTime()
-  local includeAutoFallbackBars = (db.showAutoFallbackBars ~= false) and not IsStrictSyncMode()
+  local includeAutoFallbackBars = db.showAutoFallbackBars ~= false
 
   for _, unit in ipairs(BuildRuntimeUnitsForDisplay()) do
     unitsByToken[unit] = true
@@ -714,10 +685,6 @@ end
 
 local function CanRecordWatcherTimestamp(ownerUnit)
   if not ownerUnit or not UnitExists(ownerUnit) or not UnitIsPlayer(ownerUnit) then
-    return false
-  end
-
-  if IsStrictSyncMode() then
     return false
   end
 
@@ -802,10 +769,6 @@ end
 
 local function DetectCrowdControlAuras(unit)
   if not db or not db.enabled or not unit or not UnitExists(unit) then
-    return
-  end
-
-  if IsStrictSyncMode() then
     return
   end
 
@@ -926,7 +889,7 @@ for _, au in ipairs(ccAuraUnits) do
 end
 
 local function AnnouncePresence()
-  if not db or not db.enabled or db.syncEnabled == false or not IsInGroup() then
+  if not db or not db.enabled or not IsInGroup() then
     return
   end
 
@@ -957,7 +920,7 @@ local function AnnouncePresence()
 end
 
 local function HandleSyncHelloMessage(payload, sender)
-  if not db or not db.enabled or db.syncEnabled == false then
+  if not db or not db.enabled then
     return
   end
 
@@ -972,11 +935,9 @@ local function HandleSyncHelloMessage(payload, sender)
     GetManifestForUser(senderShort)
   end
 
-  if not IsStrictSyncMode() then
-    RegisterRuntimeCrowdControl(unit, nil, nil, {
-      auto = true,
-    })
-  end
+  RegisterRuntimeCrowdControl(unit, nil, nil, {
+    auto = true,
+  })
 
   if runtime.lastHelloAt <= 0 or (GetTime() - runtime.lastHelloAt) > 5 then
     AnnouncePresence()
@@ -1009,7 +970,7 @@ local function PruneManifestCrowdControl(shortName, spellSet)
 end
 
 local function HandleSyncCrowdControlManifestMessage(payload, sender)
-  if not db or not db.enabled or db.syncEnabled == false then
+  if not db or not db.enabled then
     return
   end
 
@@ -1037,11 +998,12 @@ local function HandleSyncCrowdControlManifestMessage(payload, sender)
   end
 
   manifest.spells = BuildSpellSet(manifest.spellList)
+  manifest.received = true
   PruneManifestCrowdControl(senderShort, manifest.spells)
 end
 
 local function HandleSyncCrowdControlMessage(message, sender)
-  if not db or not db.enabled or db.syncEnabled == false then
+  if not db or not db.enabled then
     return
   end
 
@@ -1076,7 +1038,7 @@ local function HandleSyncCrowdControlMessage(message, sender)
     return
   end
 
-  if IsStrictSyncMode() and not HasManifestSpell(senderShort, spellID) then
+  if HasAuthoritativeManifest(senderShort) and not HasManifestSpell(senderShort, spellID) then
     return
   end
 
@@ -1216,32 +1178,12 @@ local function RefreshRuntimeCrowdControlRegistration()
     return
   end
 
-  if not IsStrictSyncMode() then
-    for i = 1, 4 do
-      local unit = "party" .. i
-      if UnitExists(unit) then
-        RegisterRuntimeCrowdControl(unit, nil, nil, {
-          auto = true,
-        })
-      end
-    end
-
-    return
-  end
-
   for i = 1, 4 do
     local unit = "party" .. i
     if UnitExists(unit) then
-      local shortName = ShortName(UnitName(unit))
-      local manifest = shortName and runtime.partyManifests[shortName] or nil
-      for _, spellID in ipairs((manifest and manifest.spellList) or {}) do
-        local trackedSpell = GetTrackedCrowdControlInfo(spellID)
-        if trackedSpell then
-          RegisterRuntimeCrowdControl(unit, spellID, trackedSpell.cd, {
-            auto = false,
-          })
-        end
-      end
+      RegisterRuntimeCrowdControl(unit, nil, nil, {
+        auto = true,
+      })
     end
   end
 end
@@ -1316,23 +1258,13 @@ function module:buildSettings(panel, helpers, addonRef, moduleDB)
   local behaviorColumn, layoutColumn = helpers:CreateSectionColumns(panel, stateHint, -24)
 
   local behaviorLabel = helpers:CreateDividerLabel(behaviorColumn, "Behavior", nil, 0)
-  local behaviorBody = helpers:CreateSectionHint(behaviorColumn, "Preview, visibility, sync, and filter options.", 250)
+  local behaviorBody = helpers:CreateSectionHint(behaviorColumn, "Preview, visibility, and filter options.", 250)
   behaviorBody:SetPoint("TOPLEFT", behaviorLabel, "BOTTOMLEFT", 0, -8)
-
-  local syncEnabledBox = helpers:CreateInlineCheckbox(behaviorColumn, "Enable Party Sync", moduleDB.syncEnabled, function(value)
-    addonRef:SetModuleValue("CrowdControlTracker", "syncEnabled", value)
-  end)
-  syncEnabledBox:SetPoint("TOPLEFT", behaviorBody, "BOTTOMLEFT", 0, -12)
-
-  local strictSyncBox = helpers:CreateInlineCheckbox(behaviorColumn, "Strict Sync Mode", moduleDB.strictSyncMode == true, function(value)
-    addonRef:SetModuleValue("CrowdControlTracker", "strictSyncMode", value)
-  end)
-  strictSyncBox:SetPoint("TOPLEFT", syncEnabledBox, "BOTTOMLEFT", 0, -8)
 
   local showReadyBox = helpers:CreateInlineCheckbox(behaviorColumn, "Show Ready Bars", moduleDB.showReady ~= false, function(value)
     addonRef:SetModuleValue("CrowdControlTracker", "showReady", value)
   end)
-  showReadyBox:SetPoint("TOPLEFT", strictSyncBox, "BOTTOMLEFT", 0, -8)
+  showReadyBox:SetPoint("TOPLEFT", behaviorBody, "BOTTOMLEFT", 0, -12)
 
   local hideOutOfCombatBox = helpers:CreateInlineCheckbox(behaviorColumn, "Hide Out of Combat", moduleDB.hideOutOfCombat, function(value)
     addonRef:SetModuleValue("CrowdControlTracker", "hideOutOfCombat", value)
@@ -1361,27 +1293,17 @@ function module:buildSettings(panel, helpers, addonRef, moduleDB)
   end)
   showInDungeonBox:SetPoint("TOPLEFT", filterModeDropdown, "BOTTOMLEFT", 0, -10)
 
-  local showInRaidBox = helpers:CreateInlineCheckbox(behaviorColumn, "Show in Raids", moduleDB.showInRaid ~= false, function(value)
-    addonRef:SetModuleValue("CrowdControlTracker", "showInRaid", value)
-  end)
-  showInRaidBox:SetPoint("TOPLEFT", showInDungeonBox, "BOTTOMLEFT", 0, -8)
-
   local showInWorldBox = helpers:CreateInlineCheckbox(behaviorColumn, "Show in World", moduleDB.showInWorld ~= false, function(value)
     addonRef:SetModuleValue("CrowdControlTracker", "showInWorld", value)
   end)
-  showInWorldBox:SetPoint("TOPLEFT", showInRaidBox, "BOTTOMLEFT", 0, -8)
-
-  local showInArenaBox = helpers:CreateInlineCheckbox(behaviorColumn, "Show in Arena", moduleDB.showInArena ~= false, function(value)
-    addonRef:SetModuleValue("CrowdControlTracker", "showInArena", value)
-  end)
-  showInArenaBox:SetPoint("TOPLEFT", showInWorldBox, "BOTTOMLEFT", 0, -8)
+  showInWorldBox:SetPoint("TOPLEFT", showInDungeonBox, "BOTTOMLEFT", 0, -8)
 
   local behaviorHint = helpers:CreateSectionHint(
     behaviorColumn,
-    "Choose a dungeon-focused set or the full list. Remote CC bars only appear for party members using the addon sync.",
+    "Choose a dungeon-focused set or the full list. SunderingTools handles sync and fallback automatically.",
     250
   )
-  behaviorHint:SetPoint("TOPLEFT", showInArenaBox, "BOTTOMLEFT", 0, -12)
+  behaviorHint:SetPoint("TOPLEFT", showInWorldBox, "BOTTOMLEFT", 0, -12)
 
   local layoutLabel = helpers:CreateDividerLabel(layoutColumn, "Layout", nil, 0)
   local layoutBody = helpers:CreateSectionHint(layoutColumn, "Adjust size, spacing, and growth.", 250)
@@ -1473,14 +1395,10 @@ function module:onConfigChanged(addonRef, moduleDB, key)
     or key == "showHeader"
     or key == "previewWhenSolo"
     or key == "showInDungeon"
-    or key == "showInRaid"
     or key == "showInWorld"
-    or key == "showInArena"
     or key == "hideOutOfCombat"
     or key == "showReady"
     or key == "tooltipOnHover"
-    or key == "syncEnabled"
-    or key == "strictSyncMode"
     or key == "filterMode" then
     CreateContainer()
     UpdatePartyData()
@@ -2157,7 +2075,7 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
       applied.cd = trackedSpell.cd
       ApplyRuntimeCooldownEntry(applied)
       addon:DebugLog("cc", "self cast", spellID, "cd", trackedSpell.cd)
-      if db.syncEnabled ~= false then
+      if IsInGroup() then
         addon:DebugLog("cc", "send sync", spellID, "cd", trackedSpell.cd, "remaining", trackedSpell.cd)
         Sync.Send("CC", {
           spellID = spellID,

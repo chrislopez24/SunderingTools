@@ -35,7 +35,6 @@ def test_party_defensive_tracker_attaches_to_blizzard_compact_party_member_frame
 def test_party_defensive_tracker_registers_sync_paths_and_preview_edit_mode():
     source = read("Modules/PartyDefensiveTracker.lua")
 
-    assert "syncEnabled = true" in source
     assert "previewWhenSolo = true" in source
     assert 'eventFrame:RegisterEvent("CHAT_MSG_ADDON")' in source
     assert "Sync.RegisterPrefix()" in source
@@ -72,19 +71,18 @@ def test_party_defensive_tracker_does_not_artificially_exclude_raid_context_upda
     assert "return db.previewWhenSolo and not IsInGroup() and not IsInRaid()" not in source
 
 
-def test_party_defensive_tracker_gates_sync_broadcasts_and_filters_inbound_senders():
+def test_party_defensive_tracker_uses_enabled_automatic_sync_and_filters_inbound_senders():
     source = read("Modules/PartyDefensiveTracker.lua")
 
-    assert "if not db or not db.enabled or db.syncEnabled == false then" in source
+    assert "if not db or not db.enabled then" in source
+    assert "if IsInGroup() then" in source
     assert "IsTrackedSender(userKey)" in source
     assert "GetOrCreatePartyUser(userKey" in source
 
 
-def test_party_defensive_tracker_supports_strict_sync_mode_and_remaining_payloads():
+def test_party_defensive_tracker_supports_remaining_payloads_for_sync_and_fallback():
     source = read("Modules/PartyDefensiveTracker.lua")
 
-    assert "strictSyncMode = false" in source
-    assert "local function IsStrictSyncMode()" in source
     assert "payload.remaining" in source
     assert 'remaining = trackedSpell.cd' in source
 

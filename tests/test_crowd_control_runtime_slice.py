@@ -42,24 +42,22 @@ def test_crowd_control_tracker_uses_aura_detection_for_party_fallback_without_sy
     assert "runtime.recentPartyCasts[shortName] = GetTime()" in source
 
 
-def test_crowd_control_tracker_supports_raid_sync_and_kryos_style_visibility_controls():
+def test_crowd_control_tracker_supports_dungeon_world_visibility_controls():
     source = read("Modules/CrowdControlTracker.lua")
+    shared = read("Core/TrackerSettings.lua")
 
     for key in (
         "showInDungeon",
-        "showInRaid",
         "showInWorld",
-        "showInArena",
         "hideOutOfCombat",
         "showReady",
         "tooltipOnHover",
     ):
         assert key in source
 
-    assert "GetInstanceInfo()" in source
+    assert "TrackerSettings.IsBarContextAllowed(db)" in source
+    assert "GetInstanceInfo()" in shared
     assert "InCombatLockdown()" in source
-    assert 'if IsInRaid() then' in source
-    assert 'units[#units + 1] = "raid" .. i' in source
     assert 'bar:SetScript("OnEnter", function(self)' in source
     assert 'bar:SetScript("OnLeave", function() GameTooltip:Hide() end)' in source
 
@@ -83,8 +81,11 @@ def test_crowd_control_tracker_settings_shell_exposes_filter_mode_controls():
     assert '"Reset Position"' in source
     assert 'addonRef.db.global.activeEditModule == "CrowdControlTracker"' in source
     assert '"Filter Mode"' in source
-    assert '"Enable Party Sync"' in source
     assert '"Show Header"' in source
+    assert '"Show in Raids"' not in source
+    assert '"Show in Arena"' not in source
+    assert '"Enable Party Sync"' not in source
+    assert '"Strict Sync Mode"' not in source
     assert 'filterModes = { "ESSENTIALS", "ALL" }' in source
 
 
@@ -107,17 +108,17 @@ def test_crowd_control_tracker_pre_registers_remote_members_without_addon_presen
 
     assert 'RegisterRuntimeCrowdControl("player", nil, nil, {' in refresh_block
     assert 'Sync.Send("CC_MANIFEST"' in source
-    assert "if not IsStrictSyncMode() then" in refresh_block
+    assert "IsStrictSyncMode" not in source
     assert 'RegisterRuntimeCrowdControl(unit, nil, nil, {' in refresh_block
-    assert 'RegisterRuntimeCrowdControl(unit, spellID, trackedSpell.cd, {' in refresh_block
     assert "runtime.partyAddonUsers[shortName]" not in watcher_block
     assert "runtime.partyAddonUsers[sourceShortName]" not in aura_block
 
 
 def test_crowd_control_tracker_supports_optional_tracker_header():
     source = read("Modules/CrowdControlTracker.lua")
+    shared = read("Core/TrackerSettings.lua")
 
-    assert "showHeader = true" in source
+    assert "showHeader = true" in shared
     assert "local function GetHeaderHeight()" in source
     assert "container.header" in source
     assert "RefreshHeaderLayout()" in source
@@ -199,10 +200,8 @@ def test_crowd_control_tracker_keeps_party_sync_paths_while_engine_kind_lookup_i
     assert ":ApplySyncState(" in tracker_source
 
 
-def test_crowd_control_tracker_supports_strict_sync_mode_and_remaining_based_replay():
+def test_crowd_control_tracker_supports_manifest_and_remaining_based_replay():
     source = read("Modules/CrowdControlTracker.lua")
 
-    assert "strictSyncMode = false" in source
-    assert "local function IsStrictSyncMode()" in source
     assert "payload.remaining" in source
     assert "HasManifestSpell(senderShort, spellID)" in source

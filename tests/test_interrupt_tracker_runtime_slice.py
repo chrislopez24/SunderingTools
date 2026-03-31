@@ -19,10 +19,9 @@ def test_interrupt_tracker_uses_shared_combat_track_core():
     assert 'kind = "INT"' in source
 
 
-def test_interrupt_tracker_enables_sync_by_default_and_registers_addon_messages():
+def test_interrupt_tracker_registers_addon_messages_and_manifest_sync_paths():
     source = read("Modules/InterruptTracker.lua")
 
-    assert "syncEnabled = true" in source
     assert 'eventFrame:RegisterEvent("CHAT_MSG_ADDON")' in source
     assert "Sync.RegisterPrefix()" in source
     assert 'Sync.Send("HELLO"' in source
@@ -101,11 +100,14 @@ def test_interrupt_tracker_settings_shell_matches_tracker_controls():
     assert '"Lock Tracker"' in source
     assert '"Reset Position"' in source
     assert 'addonRef.db.global.activeEditModule == "InterruptTracker"' in source
-    assert '"Enable Party Sync"' in source
     assert '"Show Header"' in source
     assert '"Play Ready Sound"' in source
     assert '"Ready Sound"' in source
     assert '"Sound Channel"' in source
+    assert '"Show in Raids"' not in source
+    assert '"Show in Arena"' not in source
+    assert '"Enable Party Sync"' not in source
+    assert '"Strict Sync Mode"' not in source
     assert "OmniCD-style" not in source
 
 
@@ -145,33 +147,29 @@ def test_interrupt_tracker_handles_hello_presence_and_kryos_style_solo_self_visi
     assert 'PopulateBars(BuildRuntimeBarEntries())' in source
 
 
-def test_interrupt_tracker_supports_raid_sync_and_kryos_style_visibility_controls():
+def test_interrupt_tracker_supports_dungeon_world_visibility_controls():
     source = read("Modules/InterruptTracker.lua")
+    shared = read("Core/TrackerSettings.lua")
 
     for key in (
         "showInDungeon",
-        "showInRaid",
         "showInWorld",
-        "showInArena",
         "hideOutOfCombat",
         "showReady",
         "tooltipOnHover",
     ):
         assert key in source
 
-    assert "GetInstanceInfo()" in source
+    assert "TrackerSettings.IsBarContextAllowed(db)" in source
+    assert "GetInstanceInfo()" in shared
     assert "InCombatLockdown()" in source
-    assert 'if IsInRaid() then' in source
-    assert 'units[#units + 1] = "raid" .. i' in source
     assert 'bar:SetScript("OnEnter", function(self)' in source
     assert 'bar:SetScript("OnLeave", function() GameTooltip:Hide() end)' in source
 
 
-def test_interrupt_tracker_supports_strict_sync_mode_and_manifest_replay():
+def test_interrupt_tracker_supports_manifest_replay_and_remaining_based_sync():
     source = read("Modules/InterruptTracker.lua")
 
-    assert "strictSyncMode = false" in source
-    assert "local function IsStrictSyncMode()" in source
     assert 'Sync.Send("INT_MANIFEST"' in source
     assert "payload.remaining" in source
     assert "HasManifestSpell(senderShort, spellID)" in source
@@ -228,8 +226,9 @@ def test_interrupt_tracker_ready_sound_only_triggers_for_local_interrupt_ready_t
 
 def test_interrupt_tracker_supports_optional_tracker_header():
     source = read("Modules/InterruptTracker.lua")
+    shared = read("Core/TrackerSettings.lua")
 
-    assert "showHeader = true" in source
+    assert "showHeader = true" in shared
     assert "local function GetHeaderHeight()" in source
     assert "container.header" in source
     assert "RefreshHeaderLayout()" in source

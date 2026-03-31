@@ -29,8 +29,6 @@ local module = {
   order = 25,
   defaults = {
     enabled = true,
-    syncEnabled = true,
-    strictSyncMode = false,
     previewWhenSolo = true,
     maxIcons = 4,
     iconSize = 20,
@@ -77,6 +75,9 @@ local function NormalizeAttachmentSettings(moduleDB)
   if type(moduleDB) ~= "table" then
     return
   end
+
+  moduleDB.syncEnabled = nil
+  moduleDB.strictSyncMode = nil
 
   local missingRelativePoint = moduleDB.relativePoint == nil or moduleDB.relativePoint == ""
   local looksLikeLegacyDefault =
@@ -364,10 +365,6 @@ local function GetEntryRemaining(entry, now)
   end
 
   return math.max(0, readyAt - now)
-end
-
-local function IsStrictSyncMode()
-  return db and db.strictSyncMode == true
 end
 
 local function ShouldShowPreview()
@@ -951,10 +948,7 @@ local function ApplyDefensiveFallback(payload)
   end
 
   local spellSet = BuildSpellSet(user.spellIDs)
-  if IsStrictSyncMode() and not spellSet[spellID] then
-    return
-  end
-  if not IsStrictSyncMode() and not spellSet[spellID] then
+  if not spellSet[spellID] then
     user.spellIDs[#user.spellIDs + 1] = spellID
   end
 
@@ -1062,7 +1056,7 @@ ReconcilePartyUser = function(user, previousUser)
 end
 
 local function SendCurrentSelfState()
-  if not db or not db.enabled or db.syncEnabled == false then
+  if not db or not db.enabled then
     return
   end
 
@@ -1092,7 +1086,7 @@ local function SendCurrentSelfState()
 end
 
 local function AnnouncePresence()
-  if not db or not db.enabled or db.syncEnabled == false then
+  if not db or not db.enabled then
     return
   end
 
@@ -1180,11 +1174,9 @@ local function HandleSyncDefensiveStateMessage(payload, sender)
   if not user.classToken then
     user.classToken = trackedSpell.classToken
   end
-  if IsStrictSyncMode() and not BuildSpellSet(user.spellIDs)[payload.spellID] then
-    return
-  end
-  if not IsStrictSyncMode() and not next(user.spellIDs) then
-    RegisterUserManifest(user, { payload.spellID })
+  local spellSet = BuildSpellSet(user.spellIDs)
+  if not spellSet[payload.spellID] then
+    user.spellIDs[#user.spellIDs + 1] = payload.spellID
   end
 
   local cooldown = payload.cd
@@ -1221,7 +1213,7 @@ local function HandleSyncDefensiveStateMessage(payload, sender)
 end
 
 local function HandleSyncMessage(message, sender)
-  if not db or not db.enabled or db.syncEnabled == false then
+  if not db or not db.enabled then
     return
   end
 
@@ -1314,27 +1306,17 @@ function module:buildSettings(panel, helpers, addonRef, moduleDB)
   local behaviorColumn, layoutColumn = helpers:CreateSectionColumns(panel, stateHint, -24)
 
   local behaviorLabel = helpers:CreateDividerLabel(behaviorColumn, "Behavior", nil, 0)
-  local behaviorBody = helpers:CreateSectionHint(behaviorColumn, "Preview, sync, and tooltip behavior.", 250)
+  local behaviorBody = helpers:CreateSectionHint(behaviorColumn, "Preview and tooltip behavior.", 250)
   behaviorBody:SetPoint("TOPLEFT", behaviorLabel, "BOTTOMLEFT", 0, -8)
-
-  local syncBox = helpers:CreateInlineCheckbox(panel, "Enable Party Sync", moduleDB.syncEnabled, function(value)
-    addonRef:SetModuleValue("PartyDefensiveTracker", "syncEnabled", value)
-  end)
-  syncBox:SetPoint("TOPLEFT", behaviorBody, "BOTTOMLEFT", 0, -12)
-
-  local strictSyncBox = helpers:CreateInlineCheckbox(behaviorColumn, "Strict Sync Mode", moduleDB.strictSyncMode == true, function(value)
-    addonRef:SetModuleValue("PartyDefensiveTracker", "strictSyncMode", value)
-  end)
-  strictSyncBox:SetPoint("TOPLEFT", syncBox, "BOTTOMLEFT", 0, -8)
 
   local tooltipBox = helpers:CreateInlineCheckbox(behaviorColumn, "Show Tooltip", moduleDB.showTooltip ~= false, function(value)
     addonRef:SetModuleValue("PartyDefensiveTracker", "showTooltip", value)
   end)
-  tooltipBox:SetPoint("TOPLEFT", strictSyncBox, "BOTTOMLEFT", 0, -8)
+  tooltipBox:SetPoint("TOPLEFT", behaviorBody, "BOTTOMLEFT", 0, -12)
 
   local behaviorHint = helpers:CreateSectionHint(
     behaviorColumn,
-    "Sync keeps remote defensive timers current; tooltips show owner, spell, and status.",
+    "SunderingTools keeps sync and aura fallback automatic; tooltips show owner, spell, and status.",
     250
   )
   behaviorHint:SetPoint("TOPLEFT", tooltipBox, "BOTTOMLEFT", 0, -12)
@@ -1491,7 +1473,7 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
       applied.cd = trackedSpell.cd
       applied.charges = trackedSpell.charges or 1
 
-      if db.syncEnabled ~= false then
+      if IsInGroup() then
         addon:DebugLog("pdef", "send sync", canonicalSpellID, "cd", trackedSpell.cd, "remaining", trackedSpell.cd)
         Sync.Send("DEF_STATE", {
           spellID = canonicalSpellID,

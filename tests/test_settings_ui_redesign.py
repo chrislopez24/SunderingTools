@@ -101,9 +101,7 @@ def test_tracker_pages_keep_environment_and_behavior_controls():
 
     for source in (interrupt, crowd_control):
         assert "Show in Dungeons" in source
-        assert "Show in Raids" in source
         assert "Show in World" in source
-        assert "Show in Arena" in source
         assert "Hide Out of Combat" in source
         assert "Tooltip on Hover" in source
         assert 'helpers:CreateDividerLabel(panel, "State"' in source
@@ -111,6 +109,10 @@ def test_tracker_pages_keep_environment_and_behavior_controls():
         assert 'helpers:CreateDividerLabel(behaviorColumn, "Behavior"' in source
         assert 'helpers:CreateDividerLabel(layoutColumn, "Layout"' in source
         assert 'helpers:PlaceRow(' in source
+        assert "Show in Raids" not in source
+        assert "Show in Arena" not in source
+        assert "Enable Party Sync" not in source
+        assert "Strict Sync Mode" not in source
 
     assert "Play Ready Sound" in interrupt
     assert "Filter Mode" in crowd_control
@@ -137,6 +139,8 @@ def test_party_defensive_page_exposes_attachment_and_tooltip_controls():
     ):
         assert label in source
     assert "Show Preview When Solo" not in source
+    assert "Enable Party Sync" not in source
+    assert "Strict Sync Mode" not in source
 
 
 def test_settings_section_switch_resets_scroll_position():

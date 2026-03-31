@@ -25,6 +25,10 @@ local TrackerFrame = assert(
   _G.SunderingToolsTrackerFrame,
   "SunderingToolsTrackerFrame must load before DefensiveRaidTracker.lua"
 )
+local TrackerSettings = assert(
+  _G.SunderingToolsTrackerSettings,
+  "SunderingToolsTrackerSettings must load before DefensiveRaidTracker.lua"
+)
 
 local defaultPosX, defaultPosY = Model.GetDefaultPosition()
 local HEADER_LABEL = "Raid Defensives"
@@ -35,30 +39,10 @@ local module = {
   label = "Raid Defensive Tracker",
   description = "Track raid defensives, sync party data, and adjust layout.",
   order = 30,
-  defaults = {
-    enabled = true,
-    posX = defaultPosX,
-    posY = defaultPosY,
-    positionMode = "CENTER_OFFSET",
-    previewWhenSolo = true,
+  defaults = TrackerSettings.CreateBarDefaults(defaultPosX, defaultPosY, {
     maxBars = 3,
-    growDirection = "DOWN",
-    spacing = 0,
-    iconSize = 18,
     barWidth = 190,
-    barHeight = 18,
-    fontSize = 11,
-    syncEnabled = true,
-    strictSyncMode = false,
-    showHeader = true,
-    showInDungeon = true,
-    showInRaid = true,
-    showInWorld = true,
-    showInArena = true,
-    hideOutOfCombat = false,
-    showReady = true,
-    tooltipOnHover = true,
-  },
+  }),
 }
 
 local db = addon.db and addon.db.DefensiveRaidTracker
@@ -236,10 +220,6 @@ local function GetEntryRemaining(entry, now)
   return math.max(0, readyAt - now)
 end
 
-local function IsStrictSyncMode()
-  return db and db.strictSyncMode == true
-end
-
 local function GetCachedSpellTexture(spellID)
   if not spellID then
     return "Interface\\Icons\\INV_Misc_QuestionMark"
@@ -268,20 +248,7 @@ local function ShouldShowPreview()
 end
 
 local function IsCurrentInstanceAllowed()
-  if not db or not db.enabled then
-    return false
-  end
-
-  local _, instanceType = GetInstanceInfo()
-  if instanceType == "party" then
-    return db.showInDungeon ~= false
-  elseif instanceType == "raid" then
-    return db.showInRaid ~= false
-  elseif instanceType == "arena" then
-    return db.showInArena ~= false
-  end
-
-  return db.showInWorld ~= false
+  return TrackerSettings.IsBarContextAllowed(db)
 end
 
 local function ShouldHideForCombat()
@@ -500,7 +467,7 @@ local function RefreshRuntimeRoster()
 end
 
 local function SendCurrentSelfState()
-  if not db or db.syncEnabled == false then
+  if not db or not db.enabled then
     return
   end
 
@@ -530,7 +497,7 @@ local function SendCurrentSelfState()
 end
 
 local function AnnouncePresence()
-  if not db or db.syncEnabled == false or not IsInGroup() then
+  if not db or not db.enabled or not IsInGroup() then
     return
   end
 
@@ -738,11 +705,9 @@ local function HandleSyncDefensiveStateMessage(payload, sender)
   if not user.classToken then
     user.classToken = trackedSpell.classToken
   end
-  if IsStrictSyncMode() and not BuildSpellSet(user.spellIDs)[payload.spellID] then
-    return
-  end
-  if not IsStrictSyncMode() and not next(user.spellIDs) then
-    RegisterUserManifest(user, { payload.spellID })
+  local spellSet = BuildSpellSet(user.spellIDs)
+  if not spellSet[payload.spellID] then
+    user.spellIDs[#user.spellIDs + 1] = payload.spellID
   end
 
   local cooldown = payload.cd
@@ -779,7 +744,7 @@ local function HandleSyncDefensiveStateMessage(payload, sender)
 end
 
 local function HandleSyncMessage(message, sender)
-  if not db or not db.enabled or db.syncEnabled == false then
+  if not db or not db.enabled then
     return
   end
 
@@ -866,23 +831,13 @@ function module:buildSettings(panel, helpers, addonRef, moduleDB)
   local behaviorColumn, layoutColumn = helpers:CreateSectionColumns(panel, stateHint, -24)
 
   local behaviorLabel = helpers:CreateDividerLabel(behaviorColumn, "Behavior", nil, 0)
-  local behaviorBody = helpers:CreateSectionHint(behaviorColumn, "Preview, visibility, and sync options.", 250)
+  local behaviorBody = helpers:CreateSectionHint(behaviorColumn, "Preview and visibility options.", 250)
   behaviorBody:SetPoint("TOPLEFT", behaviorLabel, "BOTTOMLEFT", 0, -8)
-
-  local syncEnabledBox = helpers:CreateInlineCheckbox(behaviorColumn, "Enable Party Sync", moduleDB.syncEnabled, function(value)
-    addonRef:SetModuleValue("DefensiveRaidTracker", "syncEnabled", value)
-  end)
-  syncEnabledBox:SetPoint("TOPLEFT", behaviorBody, "BOTTOMLEFT", 0, -12)
-
-  local strictSyncBox = helpers:CreateInlineCheckbox(behaviorColumn, "Strict Sync Mode", moduleDB.strictSyncMode == true, function(value)
-    addonRef:SetModuleValue("DefensiveRaidTracker", "strictSyncMode", value)
-  end)
-  strictSyncBox:SetPoint("TOPLEFT", syncEnabledBox, "BOTTOMLEFT", 0, -8)
 
   local showReadyBox = helpers:CreateInlineCheckbox(behaviorColumn, "Show Ready Bars", moduleDB.showReady ~= false, function(value)
     addonRef:SetModuleValue("DefensiveRaidTracker", "showReady", value)
   end)
-  showReadyBox:SetPoint("TOPLEFT", strictSyncBox, "BOTTOMLEFT", 0, -8)
+  showReadyBox:SetPoint("TOPLEFT", behaviorBody, "BOTTOMLEFT", 0, -12)
 
   local hideOutOfCombatBox = helpers:CreateInlineCheckbox(behaviorColumn, "Hide Out of Combat", moduleDB.hideOutOfCombat, function(value)
     addonRef:SetModuleValue("DefensiveRaidTracker", "hideOutOfCombat", value)
@@ -899,27 +854,17 @@ function module:buildSettings(panel, helpers, addonRef, moduleDB)
   end)
   showInDungeonBox:SetPoint("TOPLEFT", tooltipBox, "BOTTOMLEFT", 0, -8)
 
-  local showInRaidBox = helpers:CreateInlineCheckbox(behaviorColumn, "Show in Raids", moduleDB.showInRaid ~= false, function(value)
-    addonRef:SetModuleValue("DefensiveRaidTracker", "showInRaid", value)
-  end)
-  showInRaidBox:SetPoint("TOPLEFT", showInDungeonBox, "BOTTOMLEFT", 0, -8)
-
   local showInWorldBox = helpers:CreateInlineCheckbox(behaviorColumn, "Show in World", moduleDB.showInWorld ~= false, function(value)
     addonRef:SetModuleValue("DefensiveRaidTracker", "showInWorld", value)
   end)
-  showInWorldBox:SetPoint("TOPLEFT", showInRaidBox, "BOTTOMLEFT", 0, -8)
-
-  local showInArenaBox = helpers:CreateInlineCheckbox(behaviorColumn, "Show in Arena", moduleDB.showInArena ~= false, function(value)
-    addonRef:SetModuleValue("DefensiveRaidTracker", "showInArena", value)
-  end)
-  showInArenaBox:SetPoint("TOPLEFT", showInWorldBox, "BOTTOMLEFT", 0, -8)
+  showInWorldBox:SetPoint("TOPLEFT", showInDungeonBox, "BOTTOMLEFT", 0, -8)
 
   local behaviorHint = helpers:CreateSectionHint(
     behaviorColumn,
-    "Shares raid-defensive state over addon sync and shows the shared cooldown bars.",
+    "The visible model stays focused on dungeon and world play while sync remains automatic.",
     250
   )
-  behaviorHint:SetPoint("TOPLEFT", showInArenaBox, "BOTTOMLEFT", 0, -12)
+  behaviorHint:SetPoint("TOPLEFT", showInWorldBox, "BOTTOMLEFT", 0, -12)
 
   local layoutLabel = helpers:CreateDividerLabel(layoutColumn, "Layout", nil, 0)
   local layoutBody = helpers:CreateSectionHint(layoutColumn, "Adjust size, spacing, and growth.", 250)
@@ -1011,14 +956,10 @@ function module:onConfigChanged(addonRef, moduleDB, key)
     or key == "showHeader"
     or key == "previewWhenSolo"
     or key == "showInDungeon"
-    or key == "showInRaid"
     or key == "showInWorld"
-    or key == "showInArena"
     or key == "hideOutOfCombat"
     or key == "showReady"
-    or key == "tooltipOnHover"
-    or key == "syncEnabled"
-    or key == "strictSyncMode" then
+    or key == "tooltipOnHover" then
     CreateContainer()
     UpdatePartyData()
   end
@@ -1661,7 +1602,7 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
       applied.cd = trackedSpell.cd
       applied.charges = trackedSpell.charges or 1
 
-      if db.syncEnabled ~= false then
+      if IsInGroup() then
         addon:DebugLog("rdef", "send sync", canonicalSpellID, "cd", trackedSpell.cd, "remaining", trackedSpell.cd)
         Sync.Send("DEF_STATE", {
           spellID = canonicalSpellID,

@@ -3,7 +3,6 @@ local Sync = dofile("Core/CombatTrackSync.lua")
 local function buildModuleDefaults(overrides)
   local defaults = {
     enabled = true,
-    syncEnabled = true,
     previewWhenSolo = true,
     maxBars = 3,
     growDirection = "DOWN",
@@ -14,9 +13,7 @@ local function buildModuleDefaults(overrides)
     fontSize = 11,
     showHeader = true,
     showInDungeon = true,
-    showInRaid = true,
     showInWorld = true,
-    showInArena = true,
     hideOutOfCombat = false,
     showReady = true,
     tooltipOnHover = true,
@@ -224,6 +221,7 @@ local function loadTracker(moduleDB, roster)
   dofile("Core/CombatTrackSpellDB.lua")
   dofile("Core/CombatTrackSync.lua")
   dofile("Core/CombatTrackEngine.lua")
+  dofile("Core/TrackerSettings.lua")
   dofile("Modules/DefensiveRaidTrackerModel.lua")
 
   _G.SunderingToolsFramePositioning = {
@@ -440,24 +438,6 @@ end
 do
   local state = loadTracker({
     enabled = true,
-    syncEnabled = false,
-  }, {
-    player = {
-      guid = "player-guid",
-      name = "Player-Realm",
-      classToken = "DEATHKNIGHT",
-    },
-  })
-
-  state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "DEF_STATE:51052:RAID_DEF:120:1:120", nil, "Other-Realm")
-
-  assert(#getRaidEntryKeys(state.runtime) == 0, "sync-disabled raid defensive tracker should ignore inbound sync state")
-  assert(next(state.runtime.partyUsers) == nil, "sync-disabled raid defensive tracker should not create remote users from sync traffic")
-end
-
-do
-  local state = loadTracker({
-    enabled = true,
     syncEnabled = true,
   }, {
     player = {
@@ -545,8 +525,6 @@ end
 do
   local state = loadTracker({
     enabled = true,
-    syncEnabled = true,
-    strictSyncMode = true,
   }, {
     _group = true,
     player = {
@@ -566,13 +544,12 @@ do
   state.onEvent(nil, "GROUP_ROSTER_UPDATE")
   local baselineKeys = getRaidEntryKeys(state.runtime)
   state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "DEF_STATE:51052:RAID_DEF:120:1:120", nil, "Other-Realm")
-  local keysWithoutManifest = getRaidEntryKeys(state.runtime)
-  assert(#keysWithoutManifest == #baselineKeys, "strict raid defensive mode should ignore synced state until a manifest is known")
+  local keysAfterState = getRaidEntryKeys(state.runtime)
+  assert(#keysAfterState == (#baselineKeys + 1), "automatic raid defensive sync should accept tracked state before a manifest arrives")
 
-  state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "DEF_MANIFEST:RAID_DEF:51052", nil, "Other-Realm")
-  state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "DEF_STATE:51052:RAID_DEF:120:1:120", nil, "Other-Realm")
-  local keysWithManifest = getRaidEntryKeys(state.runtime)
-  assert(#keysWithManifest == (#baselineKeys + 1), "strict raid defensive mode should accept synced state after a manifest announces the spell")
+  state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "DEF_MANIFEST:RAID_DEF:", nil, "Other-Realm")
+  local keysAfterEmptyManifest = getRaidEntryKeys(state.runtime)
+  assert(#keysAfterEmptyManifest == #baselineKeys, "explicit empty raid defensive manifests should prune stale synced entries")
 end
 
 do

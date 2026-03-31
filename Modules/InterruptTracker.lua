@@ -28,6 +28,10 @@ local TrackerFrame = assert(
     _G.SunderingToolsTrackerFrame,
     "SunderingToolsTrackerFrame must load before InterruptTracker.lua"
 )
+local TrackerSettings = assert(
+    _G.SunderingToolsTrackerSettings,
+    "SunderingToolsTrackerSettings must load before InterruptTracker.lua"
+)
 local LSM = LibStub and LibStub("LibSharedMedia-3.0", true)
 local defaultPosX, defaultPosY = Model.GetDefaultPosition()
 local HEADER_LABEL = "Interrupts"
@@ -56,33 +60,11 @@ local module = {
     label = "Interrupt Tracker",
     description = "Track interrupts, sync party data, and adjust layout.",
     order = 10,
-    defaults = {
-        enabled = true,
-        posX = defaultPosX,
-        posY = defaultPosY,
-        positionMode = "CENTER_OFFSET",
-        previewWhenSolo = true,
-        maxBars = 5,
-        growDirection = "DOWN",
-        spacing = 0,
-        iconSize = 18,
-        barWidth = 175,
-        barHeight = 18,
-        fontSize = 11,
-        syncEnabled = true,
-        strictSyncMode = false,
-        showHeader = true,
-        showInDungeon = true,
-        showInRaid = true,
-        showInWorld = true,
-        showInArena = true,
-        hideOutOfCombat = false,
-        showReady = true,
-        tooltipOnHover = true,
+    defaults = TrackerSettings.CreateBarDefaults(defaultPosX, defaultPosY, {
         readySoundEnabled = false,
         readySoundPath = READY_SOUND_DEFAULT,
         readySoundChannel = "Master",
-    },
+    }),
 }
 
 local db = addon.db and addon.db.InterruptTracker
@@ -124,10 +106,6 @@ local runtime = {
 }
 local CHANNEL_MIN_DURATION = 1.0
 
-local function IsStrictSyncMode()
-    return db and db.strictSyncMode == true
-end
-
 local function GetCachedSpellTexture(spellID)
     if not spellID then
         return "Interface\\Icons\\INV_Misc_QuestionMark"
@@ -156,20 +134,7 @@ local function ShouldShowPreview()
 end
 
 local function IsCurrentInstanceAllowed()
-    if not db or not db.enabled then
-        return false
-    end
-
-    local _, instanceType = GetInstanceInfo()
-    if instanceType == "party" then
-        return db.showInDungeon ~= false
-    elseif instanceType == "raid" then
-        return db.showInRaid ~= false
-    elseif instanceType == "arena" then
-        return db.showInArena ~= false
-    end
-
-    return db.showInWorld ~= false
+    return TrackerSettings.IsBarContextAllowed(db)
 end
 
 local function ShouldHideForCombat()
@@ -476,11 +441,17 @@ local function GetManifestForUser(shortName)
     if not manifest then
         manifest = {
             spells = {},
+            received = false,
         }
         runtime.partyManifests[shortName] = manifest
     end
 
     return manifest
+end
+
+local function HasAuthoritativeManifest(shortName)
+    local manifest = shortName and runtime.partyManifests[shortName] or nil
+    return manifest ~= nil and manifest.received == true
 end
 
 local function HasManifestSpell(shortName, spellID)
@@ -512,6 +483,7 @@ local function RegisterInterruptManifest(shortName, spellIDs)
     end
 
     manifest.spells = BuildSpellSet(manifest.spellList)
+    manifest.received = true
     return manifest
 end
 
@@ -585,10 +557,6 @@ end
 local function RegisterRuntimeInterrupt(unit, spellID, cooldownOverride, options)
     options = options or {}
     if not unit or not UnitExists(unit) then
-        return nil
-    end
-
-    if IsStrictSyncMode() and options.auto and unit ~= "player" then
         return nil
     end
 
@@ -685,21 +653,10 @@ local function RefreshRuntimePartyRegistration()
     for i = 1, 4 do
         local unit = "party" .. i
         if UnitExists(unit) then
-            local shortName = ShortName(UnitName(unit))
-            if not IsStrictSyncMode() then
-                RegisterRuntimeInterrupt(unit, nil, nil, {
-                    auto = true,
-                    source = "auto",
-                })
-            else
-                local manifestSpellID = GetManifestSpellID(shortName)
-                if manifestSpellID then
-                    RegisterRuntimeInterrupt(unit, manifestSpellID, nil, {
-                        auto = false,
-                        source = "sync",
-                    })
-                end
-            end
+            RegisterRuntimeInterrupt(unit, nil, nil, {
+                auto = true,
+                source = "auto",
+            })
         end
     end
 end
@@ -830,7 +787,7 @@ end
 local SendCurrentSelfState
 
 local function AnnouncePresence()
-    if not db or not db.enabled or db.syncEnabled == false or not IsInGroup() then
+    if not db or not db.enabled or not IsInGroup() then
         return
     end
 
@@ -848,7 +805,7 @@ local function AnnouncePresence()
 end
 
 SendCurrentSelfState = function()
-    if not db or not db.enabled or db.syncEnabled == false or not IsInGroup() then
+    if not db or not db.enabled or not IsInGroup() then
         return
     end
 
@@ -872,7 +829,7 @@ SendCurrentSelfState = function()
 end
 
 local function HandleSyncHelloMessage(payload, sender)
-    if not db or not db.enabled or db.syncEnabled == false then
+    if not db or not db.enabled then
         return
     end
 
@@ -891,12 +848,10 @@ local function HandleSyncHelloMessage(payload, sender)
         GetManifestForUser(senderShort)
     end
 
-    if not IsStrictSyncMode() then
-        RegisterRuntimeInterrupt(unit, nil, nil, {
-            auto = false,
-            source = "auto",
-        })
-    end
+    RegisterRuntimeInterrupt(unit, nil, nil, {
+        auto = false,
+        source = "auto",
+    })
 
     if runtime.lastHelloAt <= 0 or (GetTime() - runtime.lastHelloAt) > 5 then
         AnnouncePresence()
@@ -905,7 +860,7 @@ local function HandleSyncHelloMessage(payload, sender)
 end
 
 local function HandleSyncInterruptManifestMessage(payload, sender)
-    if not db or not db.enabled or db.syncEnabled == false then
+    if not db or not db.enabled then
         return
     end
 
@@ -930,16 +885,12 @@ local function HandleSyncInterruptManifestMessage(payload, sender)
             auto = false,
             source = "sync",
         })
-    elseif IsStrictSyncMode() then
+    else
         RemovePartyUser(shortName)
     end
 end
 
 local function HandleEnemyInterrupted()
-    if IsStrictSyncMode() then
-        return
-    end
-
     local now = GetTime()
     local bestName = nil
     local bestDelta = 999
@@ -1050,10 +1001,6 @@ local function CanRecordWatcherTimestamp(ownerUnit)
         return false
     end
 
-    if IsStrictSyncMode() then
-        return false
-    end
-
     local shortName = ShortName(UnitName(ownerUnit))
     if not shortName or shortName == "" or runtime.noInterruptPlayers[shortName] then
         return false
@@ -1090,7 +1037,7 @@ local function HandlePartyWatcher(ownerUnit)
 end
 
 local function HandleSyncInterruptMessage(message, sender)
-    if not db or not db.enabled or db.syncEnabled == false then
+    if not db or not db.enabled then
         return
     end
 
@@ -1121,7 +1068,7 @@ local function HandleSyncInterruptMessage(message, sender)
     end
 
     local senderShort = ShortName(sender)
-    if IsStrictSyncMode() and not HasManifestSpell(senderShort, spellID) then
+    if HasAuthoritativeManifest(senderShort) and not HasManifestSpell(senderShort, spellID) then
         return
     end
 
@@ -1226,23 +1173,13 @@ function module:buildSettings(panel, helpers, addonRef, moduleDB)
     local behaviorColumn, layoutColumn = helpers:CreateSectionColumns(panel, stateHint, -24)
 
     local behaviorLabel = helpers:CreateDividerLabel(behaviorColumn, "Behavior", nil, 0)
-    local behaviorBody = helpers:CreateSectionHint(behaviorColumn, "Preview, visibility, sync, and ready sound options.", 250)
+    local behaviorBody = helpers:CreateSectionHint(behaviorColumn, "Preview, visibility, and ready sound options.", 250)
     behaviorBody:SetPoint("TOPLEFT", behaviorLabel, "BOTTOMLEFT", 0, -8)
-
-    local syncEnabledBox = helpers:CreateInlineCheckbox(behaviorColumn, "Enable Party Sync", moduleDB.syncEnabled, function(value)
-        addonRef:SetModuleValue("InterruptTracker", "syncEnabled", value)
-    end)
-    syncEnabledBox:SetPoint("TOPLEFT", behaviorBody, "BOTTOMLEFT", 0, -12)
-
-    local strictSyncBox = helpers:CreateInlineCheckbox(behaviorColumn, "Strict Sync Mode", moduleDB.strictSyncMode == true, function(value)
-        addonRef:SetModuleValue("InterruptTracker", "strictSyncMode", value)
-    end)
-    strictSyncBox:SetPoint("TOPLEFT", syncEnabledBox, "BOTTOMLEFT", 0, -8)
 
     local showReadyBox = helpers:CreateInlineCheckbox(behaviorColumn, "Show Ready Bars", moduleDB.showReady ~= false, function(value)
         addonRef:SetModuleValue("InterruptTracker", "showReady", value)
     end)
-    showReadyBox:SetPoint("TOPLEFT", strictSyncBox, "BOTTOMLEFT", 0, -8)
+    showReadyBox:SetPoint("TOPLEFT", behaviorBody, "BOTTOMLEFT", 0, -12)
 
     local hideOutOfCombatBox = helpers:CreateInlineCheckbox(behaviorColumn, "Hide Out of Combat", moduleDB.hideOutOfCombat, function(value)
         addonRef:SetModuleValue("InterruptTracker", "hideOutOfCombat", value)
@@ -1259,27 +1196,17 @@ function module:buildSettings(panel, helpers, addonRef, moduleDB)
     end)
     showInDungeonBox:SetPoint("TOPLEFT", tooltipBox, "BOTTOMLEFT", 0, -8)
 
-    local showInRaidBox = helpers:CreateInlineCheckbox(behaviorColumn, "Show in Raids", moduleDB.showInRaid ~= false, function(value)
-        addonRef:SetModuleValue("InterruptTracker", "showInRaid", value)
-    end)
-    showInRaidBox:SetPoint("TOPLEFT", showInDungeonBox, "BOTTOMLEFT", 0, -8)
-
     local showInWorldBox = helpers:CreateInlineCheckbox(behaviorColumn, "Show in World", moduleDB.showInWorld ~= false, function(value)
         addonRef:SetModuleValue("InterruptTracker", "showInWorld", value)
     end)
-    showInWorldBox:SetPoint("TOPLEFT", showInRaidBox, "BOTTOMLEFT", 0, -8)
-
-    local showInArenaBox = helpers:CreateInlineCheckbox(behaviorColumn, "Show in Arena", moduleDB.showInArena ~= false, function(value)
-        addonRef:SetModuleValue("InterruptTracker", "showInArena", value)
-    end)
-    showInArenaBox:SetPoint("TOPLEFT", showInWorldBox, "BOTTOMLEFT", 0, -8)
+    showInWorldBox:SetPoint("TOPLEFT", showInDungeonBox, "BOTTOMLEFT", 0, -8)
 
     local behaviorHint = helpers:CreateSectionHint(
         behaviorColumn,
-        "Shares tracked casts with party members using the addon.",
+        "SunderingTools handles sync and fallback automatically while keeping the visible model small.",
         250
     )
-    behaviorHint:SetPoint("TOPLEFT", showInArenaBox, "BOTTOMLEFT", 0, -12)
+    behaviorHint:SetPoint("TOPLEFT", showInWorldBox, "BOTTOMLEFT", 0, -12)
 
     local readySoundBox = helpers:CreateInlineCheckbox(behaviorColumn, "Play Ready Sound", moduleDB.readySoundEnabled, function(value)
         addonRef:SetModuleValue("InterruptTracker", "readySoundEnabled", value)
@@ -1400,14 +1327,10 @@ function module:onConfigChanged(addonRef, moduleDB, key)
         or key == "showHeader"
         or key == "previewWhenSolo"
         or key == "showInDungeon"
-        or key == "showInRaid"
         or key == "showInWorld"
-        or key == "showInArena"
         or key == "hideOutOfCombat"
         or key == "showReady"
         or key == "tooltipOnHover"
-        or key == "syncEnabled"
-        or key == "strictSyncMode"
         or key == "readySoundEnabled"
         or key == "readySoundPath"
         or key == "readySoundChannel" then
@@ -2280,7 +2203,7 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
                 applied.cd = cooldown
                 ApplyRuntimeCooldownEntry(applied, true)
                 addon:DebugLog("int", "self cast", canonicalSpellID, "cd", cooldown)
-                if db.syncEnabled ~= false then
+                if IsInGroup() then
                     addon:DebugLog("int", "send sync", canonicalSpellID, "cd", cooldown, "remaining", cooldown)
                     Sync.Send("INT", {
                         spellID = canonicalSpellID,

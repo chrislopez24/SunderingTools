@@ -24,7 +24,6 @@ def test_defensive_raid_tracker_uses_shared_combat_track_core_and_raid_def_kind(
 def test_defensive_raid_tracker_registers_sync_and_addon_message_hooks():
     source = read("Modules/DefensiveRaidTracker.lua")
 
-    assert "syncEnabled = true" in source
     assert 'eventFrame:RegisterEvent("CHAT_MSG_ADDON")' in source
     assert "Sync.RegisterPrefix()" in source
     assert 'Sync.Send("HELLO"' in source
@@ -34,17 +33,19 @@ def test_defensive_raid_tracker_registers_sync_and_addon_message_hooks():
 
 def test_defensive_raid_tracker_supports_preview_and_runtime_bar_population():
     source = read("Modules/DefensiveRaidTracker.lua")
+    shared = read("Core/TrackerSettings.lua")
 
     assert "Model.BuildPreviewBars()" in source
     assert "PopulateBars(BuildPreviewBars())" in source
     assert "PopulateBars(BuildRuntimeBarEntries())" in source
-    assert "previewWhenSolo = true" in source
+    assert "previewWhenSolo = true" in shared
 
 
-def test_defensive_raid_tracker_inbound_sync_is_guarded_by_module_settings():
+def test_defensive_raid_tracker_inbound_sync_follows_enabled_automatic_sync_policy():
     source = read("Modules/DefensiveRaidTracker.lua")
 
-    assert "if not db or not db.enabled or db.syncEnabled == false then" in source
+    assert "if not db or not db.enabled then" in source
+    assert "if IsInGroup() then" in source
 
 
 def test_defensive_raid_tracker_prunes_and_reconciles_runtime_sync_state():
@@ -68,10 +69,8 @@ def test_defensive_raid_tracker_only_registers_remote_members_from_sync_manifest
     assert "SpellDB.GetKnownRaidDefensiveSpellsForClass" in roster_block
 
 
-def test_defensive_raid_tracker_supports_strict_sync_mode_and_remaining_payloads():
+def test_defensive_raid_tracker_supports_manifest_and_remaining_payloads():
     source = read("Modules/DefensiveRaidTracker.lua")
 
-    assert "strictSyncMode = false" in source
-    assert "local function IsStrictSyncMode()" in source
     assert "payload.remaining" in source
     assert 'remaining = trackedSpell.cd' in source
