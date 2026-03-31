@@ -12,11 +12,13 @@ def test_crowd_control_tracker_uses_shared_combat_track_core():
     source = read("Modules/CrowdControlTracker.lua")
 
     assert "_G.SunderingToolsCombatTrackSpellDB" in source
+    assert "_G.SunderingToolsCooldownViewerMeta" in source
     assert "_G.SunderingToolsCombatTrackSync" in source
     assert "_G.SunderingToolsCombatTrackEngine" in source
     assert "_G.SunderingToolsPartyCrowdControlResolver" in source
     assert "engine = Engine.New()" in source
     assert 'kind = "CC"' in source
+    assert "ResolveSpellMetadata" in source
 
 
 def test_crowd_control_tracker_registers_kryos_style_self_party_and_sync_paths():

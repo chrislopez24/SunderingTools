@@ -12,11 +12,13 @@ def test_interrupt_tracker_uses_shared_combat_track_core():
     source = read("Modules/InterruptTracker.lua")
 
     assert "_G.SunderingToolsCombatTrackSpellDB" in source
+    assert "_G.SunderingToolsCooldownViewerMeta" in source
     assert "_G.SunderingToolsCombatTrackSync" in source
     assert "_G.SunderingToolsCombatTrackEngine" in source
     assert "partyUsers = {}" in source
     assert "runtime.engine:UpsertEntry({" in source
     assert 'kind = "INT"' in source
+    assert "ResolveSpellMetadata" in source
 
 
 def test_interrupt_tracker_registers_addon_messages_and_manifest_sync_paths():
@@ -61,7 +63,7 @@ def test_interrupt_tracker_self_cast_canonicalizes_event_spell_ids():
     event_end = source.index('    elseif event == "CHAT_MSG_ADDON" then', event_start)
     self_block = source[event_start:event_end]
 
-    assert 'local canonicalSpellID = SpellDB.ResolveTrackedSpellID(spellID)' in self_block
+    assert 'local canonicalSpellID = SpellDB.ResolveTrackedSpellID(ResolveLocalMetadataSpellID(spellID))' in self_block
     assert "registeredEntry.spellID ~= canonicalSpellID" in self_block
     assert ':ApplySelfCast(UnitGUID("player"), canonicalSpellID, now, now + cooldown)' in self_block
 
@@ -133,7 +135,23 @@ def test_interrupt_tracker_emits_debug_logs_for_party_cast_and_correlation_paths
     assert 'addon:DebugLog("int", "party cast", shortName)' in source
     assert 'addon:DebugLog("int", "corr", bestName, "delta", string.format("%.3f", bestDelta))' in source
     assert 'addon:DebugLog("int", "corr", "self", "delta", string.format("%.3f", selfDelta))' in source
+    assert 'local sawRecentInterruptCandidate = selfDelta < 1.5' in source
+    assert "if delta <= 1.5 then" in source
+    assert 'elseif sawRecentInterruptCandidate then' in source
     assert 'addon:DebugLog("int", "corr", "miss")' in source
+
+
+def test_interrupt_tracker_deduplicates_self_correlation_events_before_consuming_timestamp():
+    source = read("Modules/InterruptTracker.lua")
+
+    corr_start = source.index("local function HandleEnemyInterrupted()")
+    corr_end = source.index("local function BuildEnemyChannelKey(unit)", corr_start)
+    corr_block = source[corr_start:corr_end]
+
+    assert 'elseif selfDelta < 1.5 then' in corr_block
+    assert 'if runtime.lastCorrName == "self" and (now - runtime.lastCorrTime) < 0.2 then' in corr_block
+    assert 'runtime.lastCorrName = "self"' in corr_block
+    assert 'runtime.lastCorrTime = now' in corr_block
 
 
 def test_interrupt_tracker_handles_hello_presence_and_kryos_style_solo_self_visibility():
@@ -200,6 +218,18 @@ def test_interrupt_tracker_treats_short_enemy_channel_stops_as_interrupt_correla
     assert "local CHANNEL_MIN_DURATION" in source
     assert "HandleEnemyChannelStart(unit)" in source
     assert "HandleEnemyChannelStop(unit)" in source
+
+
+def test_interrupt_tracker_avoids_secret_unitguid_values_as_enemy_channel_table_keys():
+    source = read("Modules/InterruptTracker.lua")
+
+    helper_start = source.index("local function BuildEnemyChannelKey(unit)")
+    helper_end = source.index("local function HandleEnemyChannelStart(unit)", helper_start)
+    helper_block = source[helper_start:helper_end]
+
+    assert "local guid = UnitGUID(unit)" in helper_block
+    assert "issecretvalue" in helper_block
+    assert "return unit" in helper_block
 
 
 def test_interrupt_tracker_ready_sound_support_is_optional_lsm_with_local_fallbacks():

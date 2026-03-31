@@ -9,6 +9,10 @@ local SpellDB = assert(
   _G.SunderingToolsCombatTrackSpellDB,
   "SunderingToolsCombatTrackSpellDB must load before PartyDefensiveTracker.lua"
 )
+local CooldownViewerMeta = assert(
+  _G.SunderingToolsCooldownViewerMeta,
+  "SunderingToolsCooldownViewerMeta must load before PartyDefensiveTracker.lua"
+)
 local Sync = assert(
   _G.SunderingToolsCombatTrackSync,
   "SunderingToolsCombatTrackSync must load before PartyDefensiveTracker.lua"
@@ -252,7 +256,9 @@ local function ExtractSpellIDs(entries)
 end
 
 local function GetTrackedDefensiveInfo(spellID)
-  local trackedSpell = SpellDB.ResolveLocalDefensiveSpell(spellID, GetLocalPlayerSpecID(), IsLocalSpellKnown)
+  local metadata = CooldownViewerMeta.ResolveSpellMetadata(spellID)
+  local resolvedSpellID = (metadata and metadata.spellID) or spellID
+  local trackedSpell = SpellDB.ResolveLocalDefensiveSpell(resolvedSpellID, GetLocalPlayerSpecID(), IsLocalSpellKnown)
   if trackedSpell and trackedSpell.kind == "DEF" then
     return trackedSpell
   end
@@ -262,7 +268,19 @@ end
 
 local function GetLocalOwnedDefensiveSpells(classToken)
   local specID = GetLocalPlayerSpecID()
-  return SpellDB.GetLocallyKnownDefensiveSpellsForClass(classToken, specID, IsLocalSpellKnown), specID
+  local entries = {}
+  for _, entry in ipairs(SpellDB.GetLocallyKnownDefensiveSpellsForClass(classToken, specID, IsLocalSpellKnown) or {}) do
+    local copy = {}
+    for key, value in pairs(entry) do
+      copy[key] = value
+    end
+    local metadata = CooldownViewerMeta.ResolveSpellMetadata(entry.spellID)
+    if metadata and type(metadata.spellID) == "number" and metadata.spellID > 0 then
+      copy.spellID = metadata.spellID
+    end
+    entries[#entries + 1] = copy
+  end
+  return entries, specID
 end
 
 local function IsAttachmentActive()
@@ -1471,7 +1489,8 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
 
     local now = GetTime()
     local playerGUID = UnitGUID("player")
-    local canonicalSpellID = trackedSpell.spellID or spellID
+    local metadata = CooldownViewerMeta.ResolveSpellMetadata(spellID)
+    local canonicalSpellID = trackedSpell.spellID or (metadata and metadata.spellID) or spellID
     addon:DebugLog("pdef", "self cast", "event", spellID, "spell", canonicalSpellID, "cd", trackedSpell.cd)
     local applied = runtime.engine:ApplySelfCast(playerGUID, canonicalSpellID, now, now + trackedSpell.cd)
     if applied then

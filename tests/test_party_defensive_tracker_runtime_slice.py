@@ -13,12 +13,14 @@ def test_party_defensive_tracker_uses_shared_defensive_core_and_def_kind_only():
 
     assert "_G.SunderingToolsPartyDefensiveTrackerModel" in source
     assert "_G.SunderingToolsCombatTrackSpellDB" in source
+    assert "_G.SunderingToolsCooldownViewerMeta" in source
     assert "_G.SunderingToolsCombatTrackSync" in source
     assert "_G.SunderingToolsCombatTrackEngine" in source
     assert 'key = "PartyDefensiveTracker"' in source
     assert 'kind = "DEF"' in source
     assert "GetKnownDefensiveSpellsForClass" in source
     assert "ResolveDefensiveSpell" in source
+    assert "ResolveSpellMetadata" in source
     assert "GetRaidDefensiveSpellsForClass" not in source
 
 

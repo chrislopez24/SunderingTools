@@ -12,6 +12,10 @@ local SpellDB = assert(
     _G.SunderingToolsCombatTrackSpellDB,
     "SunderingToolsCombatTrackSpellDB must load before InterruptTracker.lua"
 )
+local CooldownViewerMeta = assert(
+    _G.SunderingToolsCooldownViewerMeta,
+    "SunderingToolsCooldownViewerMeta must load before InterruptTracker.lua"
+)
 local Sync = assert(
     _G.SunderingToolsCombatTrackSync,
     "SunderingToolsCombatTrackSync must load before InterruptTracker.lua"
@@ -493,7 +497,9 @@ local function GetLocalInterruptManifest()
         return {}
     end
 
-    return { interruptEntry.spellID }
+    local metadata = CooldownViewerMeta.ResolveSpellMetadata(interruptEntry.spellID)
+    local manifestSpellID = (metadata and metadata.spellID) or interruptEntry.spellID
+    return { manifestSpellID }
 end
 
 local function GetEntryRemaining(entry, now)
@@ -530,6 +536,15 @@ local function GetEntryCooldown(entry)
     end
 
     return entry.baseCd or entry.cd or 0
+end
+
+local function ResolveLocalMetadataSpellID(spellID)
+    local metadata = CooldownViewerMeta.ResolveSpellMetadata(spellID)
+    if metadata and type(metadata.spellID) == "number" and metadata.spellID > 0 then
+        return metadata.spellID
+    end
+
+    return spellID
 end
 
 local function BuildEntryKey(guid, spellID)
@@ -896,9 +911,13 @@ local function HandleEnemyInterrupted()
     local bestDelta = 999
     local staleNames = {}
     local selfDelta = runtime.lastSelfInterruptTime > 0 and (now - runtime.lastSelfInterruptTime) or 999
+    local sawRecentInterruptCandidate = selfDelta < 1.5
 
     for name, observedAt in pairs(runtime.recentPartyCasts) do
         local delta = now - observedAt
+        if delta <= 1.5 then
+            sawRecentInterruptCandidate = true
+        end
         if delta > 0.5 then
             staleNames[#staleNames + 1] = name
         elseif delta < bestDelta then
@@ -946,7 +965,7 @@ local function HandleEnemyInterrupted()
             end
         end
 
-    if user and user.guid and user.spellID and (user.baseCd or 0) > 0 then
+        if user and user.guid and user.spellID and (user.baseCd or 0) > 0 then
             addon:DebugLog("int", "corr", bestName, "delta", string.format("%.3f", bestDelta))
             local applied = runtime.engine:ApplyCorrelatedCast(user.guid, user.spellID, now, now + user.baseCd)
             if applied then
@@ -958,10 +977,16 @@ local function HandleEnemyInterrupted()
             end
         end
     elseif selfDelta < 1.5 then
+        if runtime.lastCorrName == "self" and (now - runtime.lastCorrTime) < 0.2 then
+            return
+        end
+
+        runtime.lastCorrName = "self"
+        runtime.lastCorrTime = now
         addon:DebugLog("int", "corr", "self", "delta", string.format("%.3f", selfDelta))
         runtime.lastSelfInterruptTime = 0
         UpdatePartyData()
-    else
+    elseif sawRecentInterruptCandidate then
         addon:DebugLog("int", "corr", "miss")
     end
 end
@@ -971,7 +996,12 @@ local function BuildEnemyChannelKey(unit)
         return nil
     end
 
-    return UnitGUID(unit) or unit
+    local guid = UnitGUID(unit)
+    if guid and not (issecretvalue and issecretvalue(guid)) then
+        return guid
+    end
+
+    return unit
 end
 
 local function HandleEnemyChannelStart(unit)
@@ -2181,7 +2211,7 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         local unit, _, spellID = ...
         if unit ~= "player" then return end
         if type(spellID) ~= "number" then return end
-        local canonicalSpellID = SpellDB.ResolveTrackedSpellID(spellID)
+        local canonicalSpellID = SpellDB.ResolveTrackedSpellID(ResolveLocalMetadataSpellID(spellID))
         local trackedSelfSpell = SpellDB.GetTrackedSpell(canonicalSpellID)
 
         local function ApplySelfInterrupt(registeredEntry)

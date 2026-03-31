@@ -9,6 +9,10 @@ local SpellDB = assert(
   _G.SunderingToolsCombatTrackSpellDB,
   "SunderingToolsCombatTrackSpellDB must load before CrowdControlTracker.lua"
 )
+local CooldownViewerMeta = assert(
+  _G.SunderingToolsCooldownViewerMeta,
+  "SunderingToolsCooldownViewerMeta must load before CrowdControlTracker.lua"
+)
 local Sync = assert(
   _G.SunderingToolsCombatTrackSync,
   "SunderingToolsCombatTrackSync must load before CrowdControlTracker.lua"
@@ -432,10 +436,20 @@ local function GetLocalCrowdControlManifest()
 
   local spellIDs = {}
   for _, entry in ipairs(entries or {}) do
-    spellIDs[#spellIDs + 1] = entry.spellID
+    local metadata = CooldownViewerMeta.ResolveSpellMetadata(entry.spellID)
+    spellIDs[#spellIDs + 1] = (metadata and metadata.spellID) or entry.spellID
   end
 
   return spellIDs
+end
+
+local function ResolveLocalMetadataSpellID(spellID)
+  local metadata = CooldownViewerMeta.ResolveSpellMetadata(spellID)
+  if metadata and type(metadata.spellID) == "number" and metadata.spellID > 0 then
+    return metadata.spellID
+  end
+
+  return spellID
 end
 
 local function GetEntryRemaining(entry, now)
@@ -2050,13 +2064,14 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
     if unit ~= "player" then return end
     if type(spellID) ~= "number" then return end
 
-    local trackedSpell = GetTrackedCrowdControlInfo(spellID)
+    local canonicalSpellID = ResolveLocalMetadataSpellID(spellID)
+    local trackedSpell = GetTrackedCrowdControlInfo(canonicalSpellID)
     if not trackedSpell then
       return
     end
 
     local now = GetTime()
-    RegisterRuntimeCrowdControl("player", spellID, trackedSpell.cd, {
+    RegisterRuntimeCrowdControl("player", canonicalSpellID, trackedSpell.cd, {
       auto = false,
       includeAllKnown = true,
       isSpellKnown = function(knownSpellID)
@@ -2064,7 +2079,7 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
       end,
     })
 
-    local applied = runtime.engine:ApplySelfCast(UnitGUID("player"), spellID, now, now + trackedSpell.cd)
+    local applied = runtime.engine:ApplySelfCast(UnitGUID("player"), canonicalSpellID, now, now + trackedSpell.cd)
     if applied then
       applied.playerName = ShortName(UnitName("player"))
       applied.classToken = select(2, UnitClass("player"))
@@ -2074,11 +2089,11 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
       applied.baseCd = trackedSpell.cd
       applied.cd = trackedSpell.cd
       ApplyRuntimeCooldownEntry(applied)
-      addon:DebugLog("cc", "self cast", spellID, "cd", trackedSpell.cd)
+      addon:DebugLog("cc", "self cast", canonicalSpellID, "cd", trackedSpell.cd)
       if IsInGroup() then
-        addon:DebugLog("cc", "send sync", spellID, "cd", trackedSpell.cd, "remaining", trackedSpell.cd)
+        addon:DebugLog("cc", "send sync", canonicalSpellID, "cd", trackedSpell.cd, "remaining", trackedSpell.cd)
         Sync.Send("CC", {
-          spellID = spellID,
+          spellID = canonicalSpellID,
           cd = trackedSpell.cd,
           remaining = trackedSpell.cd,
         })

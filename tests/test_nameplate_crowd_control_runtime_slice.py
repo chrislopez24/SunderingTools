@@ -26,9 +26,12 @@ def test_nameplate_crowd_control_module_depends_on_party_cc_watcher():
     source = read("Modules/NameplateCrowdControl.lua")
 
     assert "SunderingToolsPartyCrowdControlAuraWatcher" in source
+    assert "SunderingToolsCombatTrackSync" in source
     assert "HARMFUL|CROWD_CONTROL" in source
     assert "CC_APPLIED" in source
     assert "CC_REMOVED" in source
+    assert "payload.icon" in source
+    assert "frame.icon:SetTexture(ResolvePayloadIcon(payload))" in source
 
 
 def test_nameplate_crowd_control_settings_include_preview_hooks():
@@ -36,3 +39,23 @@ def test_nameplate_crowd_control_settings_include_preview_hooks():
 
     assert "Preview Nameplate CC" in source
     assert "module:SetPreviewEnabled" in source
+
+
+def test_nameplate_crowd_control_skips_payloads_without_displayable_icon():
+    source = read("Modules/NameplateCrowdControl.lua")
+
+    assert "local FALLBACK_ICON = \"Interface\\\\Icons\\\\INV_Misc_QuestionMark\"" in source
+    assert "local function HasDisplayablePayload(payload)" in source
+    assert "if not frame or not payload or not HasDisplayablePayload(payload) then" in source
+
+
+def test_nameplate_crowd_control_supports_sync_enrichment_for_unknown_cc_auras():
+    source = read("Modules/NameplateCrowdControl.lua")
+
+    assert 'eventFrame:RegisterEvent("CHAT_MSG_ADDON")' in source
+    assert "Sync.GetPrefix()" in source
+    assert "local GENERIC_CC_ICON" in source
+    assert 'correlationState = "CC_UNKNOWN"' in source
+    assert "ResolveSynchronizedPayload(unitToken, payload)" in source
+    assert "ResolveSourceShortName(payload.sourceUnit)" in source
+    assert "syncEvent.senderShort == sourceShort" in source

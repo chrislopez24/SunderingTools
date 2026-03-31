@@ -5,6 +5,10 @@ local Watcher = assert(
   _G.SunderingToolsPartyCrowdControlAuraWatcher,
   "SunderingToolsPartyCrowdControlAuraWatcher must load before NameplateCrowdControl.lua"
 )
+local Sync = assert(
+  _G.SunderingToolsCombatTrackSync,
+  "SunderingToolsCombatTrackSync must load before NameplateCrowdControl.lua"
+)
 
 local module = {
   key = "NameplateCrowdControl",
@@ -26,6 +30,10 @@ local module = {
 local db = addon.db and addon.db.NameplateCrowdControl
 local previewEnabled = false
 local previewFrame = nil
+local FALLBACK_ICON = "Interface\\Icons\\INV_Misc_QuestionMark"
+local GENERIC_CC_ICON = "Interface\\Icons\\Spell_Frost_ChainsOfIce"
+local SYNC_CORRELATION_WINDOW = 1.0
+local SYNC_RETENTION_WINDOW = 3.0
 
 local runtime = {
   watcher = Watcher.New({
@@ -36,10 +44,110 @@ local runtime = {
     end,
   }),
   activeByUnit = {},
+  recentSyncs = {},
+  correlatedAuras = {},
 }
 
 local function IsNameplateUnit(unitToken)
   return type(unitToken) == "string" and string.match(unitToken, "^nameplate%d+$") ~= nil
+end
+
+local function ShortName(name)
+  if not name or name == "" then
+    return nil
+  end
+
+  if Ambiguate then
+    local short = Ambiguate(name, "short")
+    if short and short ~= "" then
+      return short
+    end
+  end
+
+  return string.match(name, "^([^%-]+)") or name
+end
+
+local function BuildAuraKey(unitToken, auraInstanceID)
+  if not unitToken or not auraInstanceID then
+    return nil
+  end
+
+  return tostring(unitToken) .. ":" .. tostring(auraInstanceID)
+end
+
+local function ResolveSourceShortName(sourceUnit)
+  if type(sourceUnit) ~= "string" or sourceUnit == "" then
+    return nil
+  end
+
+  local okName, sourceName = pcall(UnitName, sourceUnit)
+  if okName and sourceName and sourceName ~= "" then
+    return ShortName(sourceName)
+  end
+
+  return nil
+end
+
+local function PruneRecentSyncs(now)
+  now = now or GetTime()
+
+  local kept = {}
+  for _, syncEvent in ipairs(runtime.recentSyncs) do
+    if (now - (syncEvent.observedAt or 0)) <= SYNC_RETENTION_WINDOW then
+      kept[#kept + 1] = syncEvent
+    end
+  end
+
+  runtime.recentSyncs = kept
+end
+
+local function EnsureCorrelationState(payload)
+  if type(payload) ~= "table" then
+    return payload
+  end
+
+  if payload.icon ~= nil or payload.iconFileID ~= nil then
+    return payload
+  end
+
+  if type(payload.spellID) == "number" and payload.spellID > 0 then
+    return payload
+  end
+
+  payload.correlationState = "CC_UNKNOWN"
+  return payload
+end
+
+local function ApplyCorrelationMatch(payload, match)
+  if type(payload) ~= "table" then
+    return payload
+  end
+
+  EnsureCorrelationState(payload)
+
+  if type(match) == "table" and type(match.spellID) == "number" and match.spellID > 0 then
+    payload.syncSpellID = match.spellID
+    payload.syncSenderShort = match.senderShort
+    payload.correlationState = "SYNCED"
+  end
+
+  return payload
+end
+
+local function RestoreCorrelationMatch(payload)
+  if type(payload) ~= "table" then
+    return payload
+  end
+
+  EnsureCorrelationState(payload)
+
+  local auraKey = BuildAuraKey(payload.unitToken, payload.auraInstanceID)
+  local match = auraKey and runtime.correlatedAuras[auraKey] or nil
+  if match then
+    ApplyCorrelationMatch(payload, match)
+  end
+
+  return payload
 end
 
 local function GetSpellIcon(spellID)
@@ -51,7 +159,95 @@ local function GetSpellIcon(spellID)
     return GetSpellTexture(spellID)
   end
 
-  return "Interface\\Icons\\INV_Misc_QuestionMark"
+  return FALLBACK_ICON
+end
+
+local function ResolvePayloadIcon(payload)
+  if type(payload) == "table" then
+    local icon = payload.icon or payload.iconFileID
+    if icon ~= nil then
+      return icon
+    end
+
+    local syncedSpellID = payload.syncSpellID or payload.spellID
+    if type(syncedSpellID) == "number" and syncedSpellID > 0 then
+      local resolvedIcon = GetSpellIcon(syncedSpellID)
+      if resolvedIcon ~= FALLBACK_ICON then
+        return resolvedIcon
+      end
+    end
+
+    if payload.correlationState == "CC_UNKNOWN" then
+      return GENERIC_CC_ICON
+    end
+  end
+
+  return GetSpellIcon(payload and payload.spellID or nil)
+end
+
+local function HasDisplayablePayload(payload)
+  if type(payload) ~= "table" then
+    return false
+  end
+
+  if payload.icon ~= nil or payload.iconFileID ~= nil then
+    return true
+  end
+
+  if payload.correlationState == "CC_UNKNOWN" then
+    return true
+  end
+
+  return ResolvePayloadIcon(payload) ~= FALLBACK_ICON
+end
+
+local function ResolveSynchronizedPayload(unitToken, payload)
+  if type(payload) ~= "table" then
+    return payload
+  end
+
+  payload.unitToken = payload.unitToken or unitToken
+  RestoreCorrelationMatch(payload)
+  EnsureCorrelationState(payload)
+
+  if payload.correlationState ~= "CC_UNKNOWN" or payload.syncSpellID ~= nil then
+    return payload
+  end
+
+  local auraKey = BuildAuraKey(unitToken, payload.auraInstanceID)
+  local now = GetTime()
+  PruneRecentSyncs(now)
+  local sourceShort = ResolveSourceShortName(payload.sourceUnit)
+
+  if not sourceShort then
+    return payload
+  end
+
+  local matchedSpellID = nil
+  local matchedSync = nil
+
+  for _, syncEvent in ipairs(runtime.recentSyncs) do
+    local delta = now - (syncEvent.observedAt or 0)
+    if syncEvent.senderShort == sourceShort and delta >= 0 and delta <= SYNC_CORRELATION_WINDOW then
+      if matchedSpellID == nil then
+        matchedSpellID = syncEvent.spellID
+        matchedSync = syncEvent
+      elseif matchedSpellID ~= syncEvent.spellID then
+        return payload
+      end
+    end
+  end
+
+  if auraKey and matchedSync and matchedSpellID then
+    runtime.correlatedAuras[auraKey] = {
+      spellID = matchedSpellID,
+      senderShort = matchedSync.senderShort,
+      observedAt = matchedSync.observedAt,
+    }
+    ApplyCorrelationMatch(payload, runtime.correlatedAuras[auraKey])
+  end
+
+  return payload
 end
 
 local function FormatRemaining(remaining)
@@ -137,16 +333,19 @@ local function EnsureAuraFrame(parent)
       return
     end
 
-    local payload = self._payload
-    if not payload then
-      return
-    end
+  local payload = self._payload
+  if not payload then
+    return
+  end
 
     GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
     GameTooltip:ClearLines()
     GameTooltip:AddLine("Crowd Control Active", 1, 1, 1)
-    if payload.spellID and GameTooltip.SetSpellByID then
-      GameTooltip:SetSpellByID(payload.spellID)
+    local tooltipSpellID = payload.syncSpellID or payload.spellID
+    if tooltipSpellID and GameTooltip.SetSpellByID then
+      GameTooltip:SetSpellByID(tooltipSpellID)
+    elseif payload.name and payload.name ~= "" then
+      GameTooltip:AddLine(payload.name, 0.95, 0.82, 0.18)
     else
       GameTooltip:AddLine("Restricted aura", 0.8, 0.8, 0.8)
     end
@@ -182,8 +381,9 @@ local function UpdateUnitFrame(unitToken)
   end
 
   local payload = PickDisplayAura(unitToken)
+  payload = ResolveSynchronizedPayload(unitToken, payload)
   local frame = EnsureAuraFrame(nameplate)
-  if not frame or not payload then
+  if not frame or not payload or not HasDisplayablePayload(payload) then
     HideUnitFrame(unitToken)
     return
   end
@@ -191,7 +391,7 @@ local function UpdateUnitFrame(unitToken)
   frame:ClearAllPoints()
   frame:SetPoint("BOTTOM", nameplate, "TOP", db.offsetX or 0, db.offsetY or 0)
   frame:SetSize(db.iconSize or 22, db.iconSize or 22)
-  frame.icon:SetTexture(GetSpellIcon(payload.spellID))
+  frame.icon:SetTexture(ResolvePayloadIcon(payload))
   frame.cooldownText:SetShown(db.showTimer ~= false and payload.remaining ~= nil)
   frame.cooldownText:SetText(FormatRemaining(payload.remaining))
   frame._payload = payload
@@ -421,8 +621,11 @@ runtime.watcher:RegisterCallback(function(event, payload)
   runtime.activeByUnit[unitToken] = runtime.activeByUnit[unitToken] or {}
 
   if event == "CC_APPLIED" or event == "CC_UPDATED" then
+    RestoreCorrelationMatch(payload)
+    ResolveSynchronizedPayload(unitToken, payload)
     runtime.activeByUnit[unitToken][payload.auraInstanceID] = payload
   elseif event == "CC_REMOVED" then
+    runtime.correlatedAuras[BuildAuraKey(unitToken, payload.auraInstanceID)] = nil
     runtime.activeByUnit[unitToken][payload.auraInstanceID] = nil
     if not next(runtime.activeByUnit[unitToken]) then
       runtime.activeByUnit[unitToken] = nil
@@ -438,10 +641,12 @@ eventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 eventFrame:RegisterEvent("NAME_PLATE_UNIT_ADDED")
 eventFrame:RegisterEvent("NAME_PLATE_UNIT_REMOVED")
 eventFrame:RegisterEvent("UNIT_AURA")
+eventFrame:RegisterEvent("CHAT_MSG_ADDON")
 
 eventFrame:SetScript("OnEvent", function(_, event, ...)
   if event == "PLAYER_LOGIN" then
     db = addon.db and addon.db.NameplateCrowdControl
+    Sync.RegisterPrefix()
     UpdatePreviewFrame()
     RefreshAllNameplates()
     return
@@ -454,6 +659,8 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
       HideUnitFrame(unitToken)
     end
     wipe(runtime.activeByUnit)
+    wipe(runtime.correlatedAuras)
+    wipe(runtime.recentSyncs)
     UpdatePreviewFrame()
     RefreshAllNameplates()
     return
@@ -480,6 +687,37 @@ eventFrame:SetScript("OnEvent", function(_, event, ...)
     end
 
     RefreshUnit(unitToken)
+    return
+  end
+
+  if event == "CHAT_MSG_ADDON" then
+    local prefix, message, _, sender = ...
+    if prefix ~= Sync.GetPrefix() then
+      return
+    end
+
+    local messageType, payload = Sync.Decode(message)
+    if messageType ~= "CC" or type(payload) ~= "table" then
+      return
+    end
+
+    if type(payload.spellID) ~= "number" or payload.spellID <= 0 then
+      return
+    end
+
+    runtime.recentSyncs[#runtime.recentSyncs + 1] = {
+      spellID = payload.spellID,
+      senderShort = ShortName(sender),
+      observedAt = GetTime(),
+    }
+    PruneRecentSyncs()
+
+    for unitToken, unitPayloads in pairs(runtime.activeByUnit) do
+      for _, activePayload in pairs(unitPayloads or {}) do
+        ResolveSynchronizedPayload(unitToken, activePayload)
+      end
+      UpdateUnitFrame(unitToken)
+    end
   end
 end)
 

@@ -13,12 +13,14 @@ def test_defensive_raid_tracker_uses_shared_combat_track_core_and_raid_def_kind(
 
     assert '_G.SunderingToolsDefensiveRaidTrackerModel' in source
     assert "_G.SunderingToolsCombatTrackSpellDB" in source
+    assert "_G.SunderingToolsCooldownViewerMeta" in source
     assert "_G.SunderingToolsCombatTrackSync" in source
     assert "_G.SunderingToolsCombatTrackEngine" in source
     assert 'key = "DefensiveRaidTracker"' in source
     assert 'kind = "RAID_DEF"' in source
     assert "GetKnownRaidDefensiveSpellsForClass" in source
     assert "ResolveDefensiveSpell" in source
+    assert "ResolveSpellMetadata" in source
 
 
 def test_defensive_raid_tracker_registers_sync_and_addon_message_hooks():
