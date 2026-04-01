@@ -48,6 +48,13 @@ local function loadTracker(moduleDB, roster)
   local delayedCallbacks = {}
   local activeTickers = {}
   local now = 100
+  local spellCooldowns = {}
+
+  if type(roster._spellCooldowns) == "table" then
+    for spellID, info in pairs(roster._spellCooldowns) do
+      spellCooldowns[spellID] = info
+    end
+  end
 
   local function newUiObject(parent)
     local object = {
@@ -303,6 +310,13 @@ local function loadTracker(moduleDB, roster)
     GetSpellTexture = function(spellID)
       return "texture:" .. tostring(spellID)
     end,
+    GetSpellCooldown = function(spellID)
+      local info = spellCooldowns[spellID]
+      if type(info) == "function" then
+        return info(now, spellID)
+      end
+      return info
+    end,
   }
   _G.PlaySoundFile = function() end
   _G.SlashCmdList = {}
@@ -402,10 +416,20 @@ local function loadTracker(moduleDB, roster)
 
   assert(type(runtime) == "table", "interrupt tracker runtime should be reachable from the event handler")
 
+  local interruptStats
+  for index = 1, 20 do
+    local name, value = debug.getupvalue(addon.InterruptTracker.PrintStats, index)
+    if name == "interruptStats" then
+      interruptStats = value
+      break
+    end
+  end
+
   return {
     addon = addon,
     onEvent = onEvent,
     runtime = runtime,
+    interruptStats = interruptStats,
     sentMessages = sentMessages,
     activeTickers = activeTickers,
     roster = roster,
@@ -434,6 +458,9 @@ local function loadTracker(moduleDB, roster)
           ticker.callback()
         end
       end
+    end,
+    setSpellCooldown = function(spellID, info)
+      spellCooldowns[spellID] = info
     end,
   }
 end
@@ -519,6 +546,12 @@ do
   state.clearMessages()
 
   state.setTime(100)
+  state.setSpellCooldown(1766, {
+    startTime = 100,
+    duration = 15,
+    isEnabled = true,
+    modRate = 1,
+  })
   state.runtime.partyWatchFrames[1].scripts.OnEvent()
   state.onEvent(nil, "UNIT_SPELLCAST_SUCCEEDED", "player", nil, 1766)
   state.setTime(100.2)
@@ -567,6 +600,12 @@ do
   state.flushTimers()
 
   state.setTime(100)
+  state.setSpellCooldown(1766, {
+    startTime = 100,
+    duration = 15,
+    isEnabled = true,
+    modRate = 1,
+  })
   state.runtime.partyWatchFrames[1].scripts.OnEvent()
   state.runtime.partyWatchFrames[2].scripts.OnEvent()
   state.setTime(100.2)
@@ -596,6 +635,12 @@ do
   state.clearMessages()
 
   state.setTime(100)
+  state.setSpellCooldown(1766, {
+    startTime = 100,
+    duration = 15,
+    isEnabled = true,
+    modRate = 1,
+  })
   state.onEvent(nil, "UNIT_SPELLCAST_SUCCEEDED", "player", nil, 1766)
   local initialSyncCount = 0
   for _, sent in ipairs(state.sentMessages) do
@@ -644,6 +689,12 @@ do
   state.clearMessages()
 
   state.setTime(100)
+  state.setSpellCooldown(1766, {
+    startTime = 100,
+    duration = 15,
+    isEnabled = true,
+    modRate = 1,
+  })
   state.onEvent(nil, "UNIT_SPELLCAST_SUCCEEDED", "player", nil, 1766)
   state.clearMessages()
 
@@ -653,4 +704,186 @@ do
   assert(type(replayed) == "table", "peer HELLO messages should trigger replay of the current local interrupt cooldown state")
   assert(replayed.spellID == 1766, "interrupt replay after HELLO should carry the active canonical interrupt spell")
   assert(replayed.remaining == 15, "interrupt replay after HELLO should send the current remaining cooldown")
+end
+
+do
+  local state = loadTracker(nil, {
+    player = {
+      guid = "player-guid",
+      name = "Player-Realm",
+      classToken = "DEATHKNIGHT",
+      specID = 252,
+      role = "DAMAGER",
+    },
+    _spellCooldowns = {
+      [47528] = {
+        startTime = 0,
+        duration = 0,
+        isEnabled = true,
+        modRate = 1,
+      },
+    },
+  })
+
+  state.onEvent(nil, "PLAYER_LOGIN")
+  state.onEvent(nil, "PLAYER_ENTERING_WORLD")
+  state.flushTimers()
+
+  state.setTime(100)
+  state.onEvent(nil, "UNIT_SPELLCAST_SUCCEEDED", "player", nil, 47528)
+
+  local selfEntry = state.runtime.engine:GetEntry("player-guid:47528")
+  assert(selfEntry == nil or selfEntry.startTime == 0 or selfEntry.readyAt == 0,
+    "self interrupt casts should be ignored when the real spell cooldown did not start")
+end
+
+do
+  local state = loadTracker(nil, {
+    _group = true,
+    player = {
+      guid = "player-guid",
+      name = "Player-Realm",
+      classToken = "ROGUE",
+      specID = 259,
+      role = "DAMAGER",
+    },
+    party1 = {
+      guid = "party-guid",
+      name = "Other-Realm",
+      classToken = "MAGE",
+      specID = 62,
+      role = "DAMAGER",
+    },
+  })
+
+  state.onEvent(nil, "PLAYER_LOGIN")
+  state.onEvent(nil, "PLAYER_ENTERING_WORLD")
+  state.flushTimers()
+
+  state.setTime(100)
+  state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "INT:2139:24:24", nil, "Other-Realm")
+  local initialEntry = state.runtime.engine:GetEntry("party-guid:2139")
+  assert(initialEntry ~= nil and initialEntry.readyAt == 124, "fresh peer sync should establish the tracked readyAt")
+
+  state.setTime(102)
+  state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "INT:2139:24:10", nil, "Other-Realm")
+
+  local staleGuardedEntry = state.runtime.engine:GetEntry("party-guid:2139")
+  assert(staleGuardedEntry ~= nil and staleGuardedEntry.readyAt == 124,
+    "stale peer sync should not move interrupt cooldown state backward")
+end
+
+do
+  local state = loadTracker(nil, {
+    _group = true,
+    player = {
+      guid = "player-guid",
+      name = "Player-Realm",
+      classToken = "ROGUE",
+      specID = 259,
+      role = "DAMAGER",
+    },
+    party1 = {
+      guid = "party-guid",
+      name = "Other-Realm",
+      classToken = "MAGE",
+      specID = 62,
+      role = "DAMAGER",
+    },
+  })
+
+  state.onEvent(nil, "PLAYER_LOGIN")
+  state.onEvent(nil, "PLAYER_ENTERING_WORLD")
+  state.flushTimers()
+
+  state.setTime(100)
+  state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "INT:1766:15:15", nil, "Other-Realm")
+
+  local mageEntry = state.runtime.engine:GetEntry("party-guid:2139")
+  local rogueEntry = state.runtime.engine:GetEntry("party-guid:1766")
+  assert(mageEntry == nil or mageEntry.startTime == 0 or mageEntry.readyAt == 0,
+    "mismatched peer sync should not fabricate a cooldown on the resolved interrupt")
+  assert(rogueEntry == nil, "mismatched peer sync should not mutate interrupt identity without manifest support")
+end
+
+do
+  local state = loadTracker(nil, {
+    _group = true,
+    player = {
+      guid = "player-guid",
+      name = "Player-Realm",
+      classToken = "ROGUE",
+      specID = 259,
+      role = "DAMAGER",
+    },
+    party1 = {
+      guid = "party-guid",
+      name = "Other-Realm",
+      classToken = "MAGE",
+      specID = 62,
+      role = "DAMAGER",
+    },
+  })
+
+  state.onEvent(nil, "PLAYER_LOGIN")
+  state.onEvent(nil, "PLAYER_ENTERING_WORLD")
+  state.flushTimers()
+
+  state.setTime(100)
+  state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "INT:2139:24:24", nil, "Other-Realm")
+
+  assert((state.interruptStats and state.interruptStats["party-guid"]) == nil,
+    "peer sync replays should not increment interrupt statistics")
+end
+
+do
+  local state = loadTracker(nil, {
+    _group = true,
+    player = {
+      guid = "player-guid",
+      name = "Player-Realm",
+      classToken = "ROGUE",
+      specID = 259,
+      role = "DAMAGER",
+    },
+    party1 = {
+      guid = "party-guid",
+      name = "Other-Realm",
+      classToken = "MAGE",
+      specID = 62,
+      role = "DAMAGER",
+    },
+  })
+
+  state.onEvent(nil, "PLAYER_LOGIN")
+  state.onEvent(nil, "PLAYER_ENTERING_WORLD")
+  state.flushTimers()
+  state.clearMessages()
+
+  state.setTime(100)
+  state.setSpellCooldown(1766, {
+    startTime = 100,
+    duration = 15,
+    isEnabled = true,
+    modRate = 1,
+  })
+  state.onEvent(nil, "UNIT_SPELLCAST_SUCCEEDED", "player", nil, 1766)
+  state.clearMessages()
+
+  state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "HELLO:MAGE:62", nil, "Other-Realm")
+  state.onEvent(nil, "CHAT_MSG_ADDON", Sync.GetPrefix(), "HELLO:MAGE:62", nil, "Other-Realm")
+
+  local manifestCount = 0
+  local syncCount = 0
+  for _, sent in ipairs(state.sentMessages) do
+    local messageType = Sync.Decode(sent.message)
+    if messageType == "INT_MANIFEST" then
+      manifestCount = manifestCount + 1
+    elseif messageType == "INT" then
+      syncCount = syncCount + 1
+    end
+  end
+
+  assert(manifestCount == 1, "duplicate HELLO messages from the same peer should throttle manifest replays")
+  assert(syncCount == 1, "duplicate HELLO messages from the same peer should throttle state replays")
 end

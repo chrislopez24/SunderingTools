@@ -101,6 +101,7 @@ local runtime = {
     activeEnemyChannels = {},
     lastSelfInterruptTime = 0,
     lastHelloAt = 0,
+    lastHelloReplyAt = {},
     lastCorrName = nil,
     lastCorrTime = 0,
     partyUsers = {},
@@ -548,6 +549,42 @@ local function ResolveLocalMetadataSpellID(spellID)
     return spellID
 end
 
+local function HasObservedSelfCooldownStart(spellID, now)
+    local spellAPI = C_Spell
+    if type(spellID) ~= "number" or not spellAPI or type(spellAPI.GetSpellCooldown) ~= "function" then
+        return true
+    end
+
+    local ok, cooldownInfo = pcall(spellAPI.GetSpellCooldown, spellID)
+    if not ok or type(cooldownInfo) ~= "table" then
+        return true
+    end
+
+    local startTime = tonumber(cooldownInfo.startTime) or 0
+    local duration = tonumber(cooldownInfo.duration) or 0
+    local modRate = tonumber(cooldownInfo.modRate) or 1
+    if startTime <= 0 or duration <= 0 or modRate <= 0 or cooldownInfo.isEnabled == false then
+        return false
+    end
+
+    local minimumDuration = 2
+    local trackedSpell = SpellDB.GetTrackedSpell(spellID)
+    if trackedSpell then
+        local trackedCooldown = trackedSpell.cd or trackedSpell.baseCd or 0
+        if type(trackedCooldown) == "number" and trackedCooldown > minimumDuration then
+            minimumDuration = math.min(trackedCooldown - 0.25, 5)
+        end
+    end
+
+    if duration + 0.05 < minimumDuration then
+        return false
+    end
+
+    now = now or GetTime()
+    local elapsed = now - startTime
+    return elapsed >= -0.25 and elapsed <= 1.5
+end
+
 local function BuildEntryKey(guid, spellID)
     if not guid or not spellID then
         return nil
@@ -802,6 +839,16 @@ end
 
 local SendCurrentSelfState
 
+local function SendInterruptManifest()
+    if not db or not db.enabled or not IsInGroup() then
+        return
+    end
+
+    Sync.Send("INT_MANIFEST", {
+        spells = GetLocalInterruptManifest(),
+    })
+end
+
 local function AnnouncePresence()
     if not db or not db.enabled or not IsInGroup() then
         return
@@ -814,9 +861,7 @@ local function AnnouncePresence()
         classToken = classToken or "UNKNOWN",
         specID = specID,
     })
-    Sync.Send("INT_MANIFEST", {
-        spells = GetLocalInterruptManifest(),
-    })
+    SendInterruptManifest()
     SendCurrentSelfState()
 end
 
@@ -863,6 +908,24 @@ local function MaybeBroadcastSelfState()
     SendCurrentSelfState()
 end
 
+local function ReplyToHello(senderShort)
+    if not db or not db.enabled or not IsInGroup() then
+        return
+    end
+
+    local now = GetTime()
+    if senderShort and senderShort ~= "" then
+        local lastReplyAt = runtime.lastHelloReplyAt[senderShort] or 0
+        if (now - lastReplyAt) < 5 then
+            return
+        end
+        runtime.lastHelloReplyAt[senderShort] = now
+    end
+
+    SendInterruptManifest()
+    SendCurrentSelfState()
+end
+
 local function HandleSyncHelloMessage(payload, sender)
     if not db or not db.enabled then
         return
@@ -888,10 +951,7 @@ local function HandleSyncHelloMessage(payload, sender)
         source = "auto",
     })
 
-    if runtime.lastHelloAt <= 0 or (GetTime() - runtime.lastHelloAt) > 5 then
-        AnnouncePresence()
-    end
-    SendCurrentSelfState()
+    ReplyToHello(senderShort)
 end
 
 local function HandleSyncInterruptManifestMessage(payload, sender)
@@ -978,6 +1038,56 @@ local function HandleEnemyInterrupted()
     elseif sawRecentInterruptCandidate then
         addon:DebugLog("int", "corr", "miss")
     end
+end
+
+local function CanAcceptSyncedInterruptSpell(senderShort, unit, spellID)
+    if not unit or type(spellID) ~= "number" or spellID <= 0 then
+        return false
+    end
+
+    local resolvedSpellID = SpellDB.ResolveTrackedSpellID(spellID)
+    if HasAuthoritativeManifest(senderShort) then
+        return HasManifestSpell(senderShort, resolvedSpellID)
+    end
+
+    local existingUser = senderShort and runtime.partyUsers[senderShort] or nil
+    if existingUser and type(existingUser.spellID) == "number" and existingUser.spellID > 0 then
+        return SpellDB.ResolveTrackedSpellID(existingUser.spellID) == resolvedSpellID
+    end
+
+    local resolvedInterrupt = GetUnitInterruptData(unit)
+    if not resolvedInterrupt or type(resolvedInterrupt.spellID) ~= "number" or resolvedInterrupt.spellID <= 0 then
+        return false
+    end
+
+    return SpellDB.ResolveTrackedSpellID(resolvedInterrupt.spellID) == resolvedSpellID
+end
+
+local function ShouldApplyIncomingInterruptSync(unit, spellID, readyAt)
+    if not unit or type(spellID) ~= "number" or spellID <= 0 then
+        return false
+    end
+
+    if type(readyAt) ~= "number" or readyAt <= 0 then
+        return false
+    end
+
+    local guid = UnitGUID(unit)
+    if not guid then
+        return false
+    end
+
+    local currentEntry = runtime.engine:GetEntry(BuildEntryKey(guid, SpellDB.ResolveTrackedSpellID(spellID)))
+    if not currentEntry then
+        return true
+    end
+
+    local currentReadyAt = tonumber(currentEntry.readyAt) or 0
+    if currentReadyAt <= 0 then
+        return true
+    end
+
+    return readyAt > (currentReadyAt + 0.05)
 end
 
 local function BuildEnemyChannelKey(unit)
@@ -1088,8 +1198,11 @@ local function HandleSyncInterruptMessage(message, sender)
         return
     end
 
+    spellID = SpellDB.ResolveTrackedSpellID(spellID)
+
     local senderShort = ShortName(sender)
-    if HasAuthoritativeManifest(senderShort) and not HasManifestSpell(senderShort, spellID) then
+    if not CanAcceptSyncedInterruptSpell(senderShort, unit, spellID) then
+        addon:DebugLog("int", "ignore sync", senderShort or "?", spellID, "identity mismatch")
         return
     end
 
@@ -1103,6 +1216,11 @@ local function HandleSyncInterruptMessage(message, sender)
     local startTime = 0
     if readyAt > 0 and cooldown > 0 then
         startTime = readyAt - cooldown
+    end
+
+    if not ShouldApplyIncomingInterruptSync(unit, spellID, readyAt) then
+        addon:DebugLog("int", "ignore sync", senderShort or "?", spellID, "stale readyAt")
+        return
     end
 
     local registered = RegisterRuntimeInterrupt(unit, spellID, cooldown, {
@@ -1125,7 +1243,7 @@ local function HandleSyncInterruptMessage(message, sender)
         applied.playerName = ShortName(UnitName(unit))
         applied.classToken = select(2, UnitClass(unit))
         applied.unitToken = unit
-        ApplyRuntimeCooldownEntry(applied, true)
+        ApplyRuntimeCooldownEntry(applied, false)
     end
 end
 
@@ -1889,6 +2007,12 @@ local function PruneRuntimeRoster()
         end
     end
 
+    for name in pairs(runtime.lastHelloReplyAt) do
+        if not currentNames[name] then
+            runtime.lastHelloReplyAt[name] = nil
+        end
+    end
+
     for _, entry in ipairs(runtime.engine:GetEntriesByKind("INT")) do
         if not currentGuids[entry.playerGUID] then
             runtime.engine:RemoveEntry(entry.key)
@@ -2132,6 +2256,7 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         runtime.lastCorrName = nil
         runtime.lastCorrTime = 0
         runtime.lastHelloAt = 0
+        wipe(runtime.lastHelloReplyAt)
         runtime.lastSelfStateSyncAt = 0
         addon:DebugLog("int", "reset runtime", "PLAYER_ENTERING_WORLD")
 
@@ -2161,6 +2286,7 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
         wipe(cooldownState)
         runtime.engine:Reset()
         runtime.lastHelloAt = 0
+        wipe(runtime.lastHelloReplyAt)
         runtime.lastSelfStateSyncAt = 0
         addon:DebugLog("int", "reset runtime", "CHALLENGE_MODE_START")
         AfterDelay(0.5, function()
@@ -2217,6 +2343,11 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
             end
 
             local now = GetTime()
+            if not HasObservedSelfCooldownStart(canonicalSpellID, now) then
+                addon:DebugLog("int", "ignore self cast", canonicalSpellID, "cooldown not started")
+                return true
+            end
+
             local cooldown = GetEntryCooldown(registeredEntry)
             local applied = runtime.engine:ApplySelfCast(UnitGUID("player"), canonicalSpellID, now, now + cooldown)
             runtime.lastSelfInterruptTime = now

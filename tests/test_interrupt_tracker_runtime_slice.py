@@ -192,7 +192,7 @@ def test_interrupt_tracker_supports_manifest_replay_and_remaining_based_sync():
 
     assert 'Sync.Send("INT_MANIFEST"' in source
     assert "payload.remaining" in source
-    assert "HasManifestSpell(senderShort, spellID)" in source
+    assert "CanAcceptSyncedInterruptSpell(senderShort, unit, spellID)" in source
 
 
 def test_interrupt_tracker_registers_kryos_style_enemy_watchers_for_interrupt_correlation():
