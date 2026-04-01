@@ -733,8 +733,8 @@ do
   state.onEvent(nil, "UNIT_SPELLCAST_SUCCEEDED", "player", nil, 47528)
 
   local selfEntry = state.runtime.engine:GetEntry("player-guid:47528")
-  assert(selfEntry == nil or selfEntry.startTime == 0 or selfEntry.readyAt == 0,
-    "self interrupt casts should be ignored when the real spell cooldown did not start")
+  assert(selfEntry ~= nil and selfEntry.startTime == 100 and selfEntry.readyAt == 115,
+    "self interrupt casts should trust the local UNIT_SPELLCAST_SUCCEEDED event even when GetSpellCooldown is not immediately useful")
 end
 
 do
@@ -783,11 +783,53 @@ do
   _G.tonumber = originalTonumber
   _G.issecretvalue = originalIsSecretValue
 
-  assert(ok, "self interrupt casts should ignore secret cooldown fields instead of throwing: " .. tostring(err))
+  assert(ok, "self interrupt casts should not read secret cooldown fields: " .. tostring(err))
 
   local selfEntry = state.runtime.engine:GetEntry("player-guid:47528")
-  assert(selfEntry == nil or selfEntry.startTime == 0 or selfEntry.readyAt == 0,
-    "self interrupt casts should not start from secret cooldown fields")
+  assert(selfEntry ~= nil and selfEntry.startTime == 100 and selfEntry.readyAt == 115,
+    "self interrupt casts should still arm from UNIT_SPELLCAST_SUCCEEDED when cooldown fields are secret")
+end
+
+do
+  local state = loadTracker(nil, {
+    player = {
+      guid = "player-guid",
+      name = "Player-Realm",
+      classToken = "DEATHKNIGHT",
+      specID = 252,
+      role = "DAMAGER",
+    },
+    _spellCooldowns = {
+      [47528] = function(now)
+        if now < 100.05 then
+          return {
+            startTime = 0,
+            duration = 0,
+            isEnabled = true,
+            modRate = 1,
+          }
+        end
+
+        return {
+          startTime = 100,
+          duration = 15,
+          isEnabled = true,
+          modRate = 1,
+        }
+      end,
+    },
+  })
+
+  state.onEvent(nil, "PLAYER_LOGIN")
+  state.onEvent(nil, "PLAYER_ENTERING_WORLD")
+  state.flushTimers()
+
+  state.setTime(100)
+  state.onEvent(nil, "UNIT_SPELLCAST_SUCCEEDED", "player", nil, 47528)
+
+  local selfEntry = state.runtime.engine:GetEntry("player-guid:47528")
+  assert(selfEntry ~= nil and selfEntry.startTime == 100 and selfEntry.readyAt == 115,
+    "self interrupt casts should arm immediately from the authoritative local cast event")
 end
 
 do

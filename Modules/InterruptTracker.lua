@@ -549,64 +549,6 @@ local function ResolveLocalMetadataSpellID(spellID)
     return spellID
 end
 
-local function ReadableNumber(value)
-    if value ~= nil and issecretvalue and issecretvalue(value) then
-        return nil
-    end
-
-    local numericValue = tonumber(value)
-    if numericValue ~= nil and issecretvalue and issecretvalue(numericValue) then
-        return nil
-    end
-
-    return numericValue
-end
-
-local function ReadableBoolean(value)
-    if value ~= nil and issecretvalue and issecretvalue(value) then
-        return nil
-    end
-
-    return value
-end
-
-local function HasObservedSelfCooldownStart(spellID, now)
-    local spellAPI = C_Spell
-    if type(spellID) ~= "number" or not spellAPI or type(spellAPI.GetSpellCooldown) ~= "function" then
-        return true
-    end
-
-    local ok, cooldownInfo = pcall(spellAPI.GetSpellCooldown, spellID)
-    if not ok or type(cooldownInfo) ~= "table" then
-        return true
-    end
-
-    local startTime = ReadableNumber(cooldownInfo.startTime) or 0
-    local duration = ReadableNumber(cooldownInfo.duration) or 0
-    local modRate = ReadableNumber(cooldownInfo.modRate) or 1
-    local isEnabled = ReadableBoolean(cooldownInfo.isEnabled)
-    if startTime <= 0 or duration <= 0 or modRate <= 0 or isEnabled == false then
-        return false
-    end
-
-    local minimumDuration = 2
-    local trackedSpell = SpellDB.GetTrackedSpell(spellID)
-    if trackedSpell then
-        local trackedCooldown = trackedSpell.cd or trackedSpell.baseCd or 0
-        if type(trackedCooldown) == "number" and trackedCooldown > minimumDuration then
-            minimumDuration = math.min(trackedCooldown - 0.25, 5)
-        end
-    end
-
-    if duration + 0.05 < minimumDuration then
-        return false
-    end
-
-    now = now or GetTime()
-    local elapsed = now - startTime
-    return elapsed >= -0.25 and elapsed <= 1.5
-end
-
 local function BuildEntryKey(guid, spellID)
     if not guid or not spellID then
         return nil
@@ -2365,11 +2307,6 @@ eventFrame:SetScript("OnEvent", function(self, event, ...)
             end
 
             local now = GetTime()
-            if not HasObservedSelfCooldownStart(canonicalSpellID, now) then
-                addon:DebugLog("int", "ignore self cast", canonicalSpellID, "cooldown not started")
-                return true
-            end
-
             local cooldown = GetEntryCooldown(registeredEntry)
             local applied = runtime.engine:ApplySelfCast(UnitGUID("player"), canonicalSpellID, now, now + cooldown)
             runtime.lastSelfInterruptTime = now

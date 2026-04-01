@@ -50,17 +50,16 @@ def test_trigger_cooldown_uses_shared_ticker_path():
     assert "ApplyRuntimeCooldownEntry(applied, true)" in trigger_block
 
 
-def test_self_cast_path_requires_real_local_cooldown_start():
+def test_self_cast_path_uses_event_authoritative_cooldown():
     source = read("Modules/InterruptTracker.lua")
-
-    assert "local function HasObservedSelfCooldownStart(spellID, now)" in source
 
     event_start = source.index('elseif event == "UNIT_SPELLCAST_SUCCEEDED" then')
     event_end = source.index('    elseif event == "CHAT_MSG_ADDON" then', event_start)
     event_block = source[event_start:event_end]
 
-    assert "if not HasObservedSelfCooldownStart(canonicalSpellID, now) then" in event_block
-    assert 'addon:DebugLog("int", "ignore self cast", canonicalSpellID, "cooldown not started")' in event_block
+    assert "runtime.engine:ApplySelfCast(UnitGUID(\"player\"), canonicalSpellID, now, now + cooldown)" in event_block
+    assert "HasObservedSelfCooldownStart" not in source
+    assert "cooldown not started" not in event_block
 
 
 def test_sync_path_requires_authoritative_or_locally_resolved_interrupt_identity():
