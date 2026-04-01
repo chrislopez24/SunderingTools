@@ -90,6 +90,7 @@ local displayState = "HIDDEN"
 local bloodlustAuraNames
 
 local RefreshAuraState
+local GetPlayerAuraBySpellID
 
 local function NormalizeName(value)
   if type(value) ~= "string" then
@@ -186,6 +187,22 @@ local function IsTrackedLockoutAura(spellID)
 end
 
 local function FindActiveTriggerAura()
+  for _, spellID in ipairs(BLOODLUST_AURA_IDS) do
+    local aura = GetPlayerAuraBySpellID(spellID)
+    if aura then
+      local expirationTime = SanitizeAuraNumber(aura.expirationTime)
+      local icon = SanitizeAuraAsset(aura.icon or aura.iconFileID)
+      local auraSpellID = SanitizeAuraNumber(aura.spellId) or spellID
+      return true, expirationTime, {
+        spellId = auraSpellID,
+        name = SanitizeAuraAsset(aura.name),
+        icon = icon,
+        iconFileID = icon,
+        expirationTime = expirationTime,
+      }
+    end
+  end
+
   if C_UnitAuras and C_UnitAuras.GetAuraDataByIndex then
     local index = 1
     while true do
@@ -260,7 +277,7 @@ local function FindActiveTriggerAura()
   return false, nil, nil
 end
 
-local function GetPlayerAuraBySpellID(spellID)
+GetPlayerAuraBySpellID = function(spellID)
   if not (C_UnitAuras and C_UnitAuras.GetPlayerAuraBySpellID) then
     return nil
   end

@@ -1,5 +1,5 @@
 ## Interface: 120000, 120001
-## Version: 0.2.3
+## Version: 0.2.4
 ## Title: SunderingTools
 ## Notes: Lightweight cool tools
 ## Author: Krich

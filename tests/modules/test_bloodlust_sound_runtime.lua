@@ -437,6 +437,32 @@ end
 
 do
   local state = loadModule()
+  state.auras[80354] = {
+    spellId = 80354,
+    name = "Temporal Displacement",
+    expirationTime = 700,
+    duration = 600,
+    icon = "temporal",
+  }
+  state.auras[80353] = {
+    spellId = 80353,
+    name = "Time Warp",
+    expirationTime = 140,
+    duration = 40,
+    icon = "timewarp",
+  }
+
+  state.onEvent(nil, "PLAYER_LOGIN")
+
+  assert(#state.soundCalls == 1, "active bloodlust queried via GetPlayerAuraBySpellID should still play the sound")
+  assert(state.shell.shown == true, "active bloodlust queried via GetPlayerAuraBySpellID should show the frame")
+  assert(state.shell.cooldown.cooldownDuration == 40, "active bloodlust queried via GetPlayerAuraBySpellID should drive the active countdown")
+  assert(state.shell.statusText == nil or state.shell.statusText.shown == false, "active bloodlust queried via GetPlayerAuraBySpellID should not fall through to lockout text")
+  assert(state.shell.icon and state.shell.icon.texture == "timewarp", "active bloodlust queried via GetPlayerAuraBySpellID should keep the active aura icon")
+end
+
+do
+  local state = loadModule()
   state.helpfulAuras[1] = {
     spellId = 80353,
     name = state.secretName,
