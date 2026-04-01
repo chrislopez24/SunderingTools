@@ -9,6 +9,7 @@ local secretSourceUnit = {}
 local auraByFilter = {}
 local durationByAuraInstanceID = {}
 local hiddenByFilter = {}
+local dispelColorCalls = {}
 
 local function newFrame()
   return {
@@ -52,6 +53,27 @@ end
 _G.Enum = {
   UnitAuraSortRule = { Unsorted = 0 },
   UnitAuraSortDirection = { Normal = 0 },
+  LuaCurveType = { Step = 1 },
+}
+
+_G.DEBUFF_TYPE_NONE_COLOR = { r = 0.9, g = 0.9, b = 0.9 }
+_G.DEBUFF_TYPE_MAGIC_COLOR = { r = 0.2, g = 0.6, b = 1.0 }
+_G.DEBUFF_TYPE_CURSE_COLOR = { r = 0.6, g = 0.0, b = 1.0 }
+_G.DEBUFF_TYPE_DISEASE_COLOR = { r = 0.6, g = 0.4, b = 0.0 }
+_G.DEBUFF_TYPE_POISON_COLOR = { r = 0.0, g = 0.6, b = 0.0 }
+_G.DEBUFF_TYPE_BLEED_COLOR = { r = 0.8, g = 0.1, b = 0.1 }
+_G.C_CurveUtil = {
+  CreateColorCurve = function()
+    return {
+      points = {},
+      SetType = function(self, curveType)
+        self.curveType = curveType
+      end,
+      AddPoint = function(self, value, color)
+        self.points[value] = color
+      end,
+    }
+  end,
 }
 
 _G.C_UnitAuras = {
@@ -63,7 +85,9 @@ _G.C_UnitAuras = {
     assert(unit == "party1", "watcher should resolve duration on the watched unit")
     return durationByAuraInstanceID[auraInstanceID]
   end,
-  GetAuraDispelTypeColor = function(_, auraInstanceID)
+  GetAuraDispelTypeColor = function(_, auraInstanceID, curve)
+    assert(curve ~= nil, "watcher should pass a dispel color curve to Blizzard API")
+    dispelColorCalls[#dispelColorCalls + 1] = curve
     return { r = auraInstanceID / 10, g = 0.2, b = 0.3 }
   end,
   AuraIsBigDefensive = function(spellID)
@@ -135,6 +159,8 @@ do
   assert(ccState[1].SpellIcon == "poly", "watcher should preserve non-secret icons")
   assert(ccState[1].SourceUnit == "party2", "watcher should preserve visible source units")
   assert(ccState[1].DurationObject.key == "cc", "watcher should preserve duration objects")
+  assert(ccState[1].DispelColor and ccState[1].DispelColor.r == 1, "watcher should preserve dispel colors returned by Blizzard API")
+  assert(#dispelColorCalls > 0, "watcher should request dispel colors for visible auras")
   assert(ccState[2].SpellId == nil, "watcher should sanitize secret crowd-control spell ids")
   assert(ccState[2].SpellName == nil, "watcher should sanitize secret crowd-control names")
   assert(ccState[2].SpellIcon == nil, "watcher should sanitize secret crowd-control icons")

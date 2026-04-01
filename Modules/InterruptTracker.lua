@@ -549,6 +549,27 @@ local function ResolveLocalMetadataSpellID(spellID)
     return spellID
 end
 
+local function ReadableNumber(value)
+    if value ~= nil and issecretvalue and issecretvalue(value) then
+        return nil
+    end
+
+    local numericValue = tonumber(value)
+    if numericValue ~= nil and issecretvalue and issecretvalue(numericValue) then
+        return nil
+    end
+
+    return numericValue
+end
+
+local function ReadableBoolean(value)
+    if value ~= nil and issecretvalue and issecretvalue(value) then
+        return nil
+    end
+
+    return value
+end
+
 local function HasObservedSelfCooldownStart(spellID, now)
     local spellAPI = C_Spell
     if type(spellID) ~= "number" or not spellAPI or type(spellAPI.GetSpellCooldown) ~= "function" then
@@ -560,10 +581,11 @@ local function HasObservedSelfCooldownStart(spellID, now)
         return true
     end
 
-    local startTime = tonumber(cooldownInfo.startTime) or 0
-    local duration = tonumber(cooldownInfo.duration) or 0
-    local modRate = tonumber(cooldownInfo.modRate) or 1
-    if startTime <= 0 or duration <= 0 or modRate <= 0 or cooldownInfo.isEnabled == false then
+    local startTime = ReadableNumber(cooldownInfo.startTime) or 0
+    local duration = ReadableNumber(cooldownInfo.duration) or 0
+    local modRate = ReadableNumber(cooldownInfo.modRate) or 1
+    local isEnabled = ReadableBoolean(cooldownInfo.isEnabled)
+    if startTime <= 0 or duration <= 0 or modRate <= 0 or isEnabled == false then
         return false
     end
 

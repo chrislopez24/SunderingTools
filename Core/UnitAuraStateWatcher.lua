@@ -1,4 +1,43 @@
 local WatcherModule = {}
+local dispelColorCurve
+local dispelColors = {
+  [0] = DEBUFF_TYPE_NONE_COLOR,
+  [1] = DEBUFF_TYPE_MAGIC_COLOR,
+  [2] = DEBUFF_TYPE_CURSE_COLOR,
+  [3] = DEBUFF_TYPE_DISEASE_COLOR,
+  [4] = DEBUFF_TYPE_POISON_COLOR,
+  [11] = DEBUFF_TYPE_BLEED_COLOR,
+}
+
+local function GetDispelColorCurve()
+  if dispelColorCurve ~= nil then
+    return dispelColorCurve
+  end
+
+  if C_CurveUtil and type(C_CurveUtil.CreateColorCurve) == "function" then
+    dispelColorCurve = C_CurveUtil.CreateColorCurve()
+
+    if dispelColorCurve and type(dispelColorCurve.SetType) == "function"
+      and Enum and Enum.LuaCurveType and Enum.LuaCurveType.Step
+    then
+      dispelColorCurve:SetType(Enum.LuaCurveType.Step)
+    end
+
+    if dispelColorCurve and type(dispelColorCurve.AddPoint) == "function" then
+      for dispelType, color in pairs(dispelColors) do
+        if color then
+          dispelColorCurve:AddPoint(dispelType, color)
+        end
+      end
+    end
+  end
+
+  if dispelColorCurve == nil then
+    dispelColorCurve = {}
+  end
+
+  return dispelColorCurve
+end
 
 local function SanitizeValue(value)
   if value ~= nil and issecretvalue and issecretvalue(value) then
@@ -91,7 +130,7 @@ local function IterateAuras(unit, filter, sortRule, sortDirection, callback)
       if durationObject then
         local dispelColor = nil
         if C_UnitAuras.GetAuraDispelTypeColor then
-          dispelColor = C_UnitAuras.GetAuraDispelTypeColor(unit, auraInstanceID)
+          dispelColor = C_UnitAuras.GetAuraDispelTypeColor(unit, auraInstanceID, GetDispelColorCurve())
         end
         callback(auraData, durationObject, dispelColor)
       end

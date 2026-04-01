@@ -739,6 +739,59 @@ end
 
 do
   local state = loadTracker(nil, {
+    player = {
+      guid = "player-guid",
+      name = "Player-Realm",
+      classToken = "DEATHKNIGHT",
+      specID = 252,
+      role = "DAMAGER",
+    },
+  })
+
+  local secretNumber = setmetatable({}, {
+    __le = function()
+      error("attempt to compare local 'startTime' (a secret number value tainted by 'SunderingTools')")
+    end,
+  })
+  local originalTonumber = tonumber
+  local originalIsSecretValue = issecretvalue
+  _G.tonumber = function(value)
+    if value == secretNumber then
+      return value
+    end
+
+    return originalTonumber(value)
+  end
+  _G.issecretvalue = function(value)
+    return value == secretNumber
+  end
+
+  state.onEvent(nil, "PLAYER_LOGIN")
+  state.onEvent(nil, "PLAYER_ENTERING_WORLD")
+  state.flushTimers()
+
+  state.setTime(100)
+  state.setSpellCooldown(47528, {
+    startTime = secretNumber,
+    duration = secretNumber,
+    isEnabled = true,
+    modRate = secretNumber,
+  })
+
+  local ok, err = pcall(state.onEvent, nil, "UNIT_SPELLCAST_SUCCEEDED", "player", nil, 47528)
+
+  _G.tonumber = originalTonumber
+  _G.issecretvalue = originalIsSecretValue
+
+  assert(ok, "self interrupt casts should ignore secret cooldown fields instead of throwing: " .. tostring(err))
+
+  local selfEntry = state.runtime.engine:GetEntry("player-guid:47528")
+  assert(selfEntry == nil or selfEntry.startTime == 0 or selfEntry.readyAt == 0,
+    "self interrupt casts should not start from secret cooldown fields")
+end
+
+do
+  local state = loadTracker(nil, {
     _group = true,
     player = {
       guid = "player-guid",
